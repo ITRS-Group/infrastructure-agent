@@ -1,0 +1,68 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+
+    <Product Name='Infrastructure Agent' Manufacturer='ITRS Group Ltd'
+        Id='*'
+        UpgradeCode='9c733c89-efa1-4f84-a589-1b7e184d4332'
+        Language='1033' Codepage='1252' Version='$(var.AgentVersion)'>
+        <Package Id='*' Keywords='Installer' Description="Infrastructure Agent Installer"
+            Comments='Version: $(var.AgentVersion)' Manufacturer='ITRS Group'
+            InstallerVersion='200' Languages='1033' Compressed='yes' SummaryCodepage='1252'
+            Platform='x64' InstallScope='perMachine' />
+
+    	<MajorUpgrade DowngradeErrorMessage="A later version of [ProductName] is already installed. Setup will now exit." />
+
+        <Media Id='1' Cabinet='Sample.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1' />
+        <Property Id='DiskPrompt' Value="Infrastructure Agent Disk [1]" />
+
+        <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='ProgramFiles64Folder' Name='PFiles'>
+                <Directory Id='INSTALLDIR' Name='Infrastructure Agent'>
+                    <Directory Id="LOGDIR" Name="logs"/>
+                    <Directory Id="CFGDIR" Name="cfg">
+                        <Directory Id="CUSTOMCFGDIR" Name="custom"/>
+                    </Directory>
+                    <Directory Id="PLUGINSDIR" Name="plugins">
+                        <Directory Id="IMPORTEDPLUGINSGDIR" Name="imported"/>
+                    </Directory>
+                </Directory>
+            </Directory>
+
+            <Directory Id="ProgramMenuFolder" Name="Programs">
+                <Directory Id="ProgramMenuDir" Name="Infrastructure Agent">
+                    <Component Id="ProgramMenuDir" Guid="8c715a49-f87a-4279-8691-930d5c076bb7">
+                        <RemoveFolder Id='ProgramMenuDir' On='uninstall' />
+                        <RegistryValue Root='HKCU' Key='Software\[Manufacturer]\[ProductName]' Type='string' Value='' KeyPath='yes' />
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+
+        <Feature Id='ExtraDirs' Level='1'>
+            <Component Id="CreateExtraDirectories" Guid="41064439-9856-4e5b-b753-ca00ef209cca" Directory="LOGDIR">
+                <CreateFolder Directory="LOGDIR" />
+                <CreateFolder Directory="CFGDIR" />
+                <CreateFolder Directory="CUSTOMCFGDIR" />
+                <CreateFolder Directory="PLUGINSDIR" />
+                <CreateFolder Directory="IMPORTEDPLUGINSGDIR" />
+            </Component>
+        </Feature>
+
+        <CustomAction Id="InstallService" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="check"
+              ExeCommand="[INSTALLDIR]\bin\infra-svce.exe --install Agent" />
+
+        <CustomAction Id="UnInstallService" Directory="INSTALLDIR" Execute="deferred" Impersonate="no" Return="check"
+              ExeCommand="[INSTALLDIR]\bin\infra-svce.exe --uninstall Agent" />
+
+        <Feature Id='Complete' Level='1'>
+            <ComponentGroupRef Id='plib' />
+            <ComponentRef Id='ProgramMenuDir' />
+        </Feature>
+
+        <InstallExecuteSequence>
+            <Custom Action='InstallService' After='InstallFiles'>(NOT Installed) AND (NOT REMOVE)</Custom>
+            <Custom Action='UnInstallService' After='InstallInitialize'>(REMOVE="ALL")</Custom>
+        </InstallExecuteSequence>
+
+    </Product>
+</Wix>

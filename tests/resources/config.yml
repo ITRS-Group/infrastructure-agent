@@ -1,0 +1,67 @@
+---
+# This is the default configuration file.
+# Please only make configuration changes in "agent.yml"
+
+cachemanager:
+  host: 127.0.0.1
+  housekeeping_interval: 60
+  max_cache_size: 1GB
+  max_item_size: 0
+  port: 8183
+  timestamp_error_margin: 300
+commands:
+  check_foo:
+    path: /bin/true
+  check_microsoft365:
+    path: C:\\Users\\opsadmin2.AD2\\Desktop\\jamie\\check_microsoft365.py
+    runtime: python
+    cache_manager: true
+  check_vsphere:
+    path: somewhere
+    runtime: python
+    cache_manager: true
+windows_runtimes:
+  valid_runtime: valid_runtime p1
+execution:
+  execution_timeout: 60
+logging:
+  handlers:
+    syslog:
+      facility: local6
+  loggers:
+    agent:
+      level: INFO
+    cache:
+      level: INFO
+    default:
+      level: INFO
+    helpers:
+      level: INFO
+    nrpe:
+      level: INFO
+poller_schedule: {}
+server:
+  allowed_hosts: []
+  allow_multi_packet_response: true
+  bind_address: null
+  receive_data_timeout: 5
+  housekeeping_interval: 300
+  max_queued_connections: 30
+  max_active_connections: 15
+  max_request_time: 120
+  port: 9997
+  tls:
+    ca_cert: null
+    ca_path: null
+    cert_file: tests/resources/certs/cert.pem
+    check_client_cert: false
+    cipher_suite: ECDH+AESGCM:ECDH+AES256:ECDH+AES128:!aNULL:!MD5:!DSS
+    context_options:
+    - NO_SSLv3
+    - NO_TLSv1
+    - NO_TLSv1_1
+    key_file: tests/resources/certs/key.pem
+  tls_enabled: true
+  tls_handshake_timeout: 3
+version: 0.0.1
+process_recycle_time: 86400

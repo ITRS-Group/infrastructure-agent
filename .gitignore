@@ -1,0 +1,39 @@
+# Build Artifacts
+*.msi
+*.wixpdb
+bin
+build
+cfg/agent.default.yml
+infrastructure-agent
+infrastructure-agent.service
+infrastructure-agent.tar.gz
+infrastructure_agent.egg-info
+VERSION
+
+# Development Files
+*.pyc
+*.sw[op]
+.config
+.DS_Store
+.envrc
+.idea/
+
+# Symlinks
+infrastructure-agent-*-plugins
+plugnpshell
+
+# Test Artifacts
+*.log
+.benchmarks
+.coverage
+.pytest_cache
+.tox
+cert.pem
+htmlcov
+junix.xml
+key.pem
+MANIFEST
+startup.log
+tests/resources/certs/*.pem
+tests/**/version
+venv

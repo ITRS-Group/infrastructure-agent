@@ -1,0 +1,3 @@
+# This is the default configuration file.
+# Please only make configuration changes within YAML files in the "custom"
+#  directory, such as "agent.yml".

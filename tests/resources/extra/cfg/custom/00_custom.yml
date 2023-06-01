@@ -1,0 +1,5 @@
+---
+cachemanager:
+  max_item_size: 42
+server:
+  port: 2112

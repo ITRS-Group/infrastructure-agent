@@ -1,0 +1,9 @@
+# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+# Dependencies of the libraries listed in requirements.txt
+
+greenlet==1.1.0
+importlib-metadata==4.8.3
+packaging==21.0
+pyparsing==2.4.7
+setuptools==59.0.1
+zipp==3.5.0

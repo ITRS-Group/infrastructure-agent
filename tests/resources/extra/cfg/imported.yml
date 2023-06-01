@@ -1,0 +1,6 @@
+---
+commands:
+  check_item:
+    path: /path/to/item
+server:
+  port: 9998

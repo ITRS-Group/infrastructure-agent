@@ -1,0 +1,16 @@
+# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+
+# Pytest + coverage
+coverage
+cryptography
+filelock
+gevent
+mock
+pycryptodome
+pytest
+pytest-mock
+pyyaml
+setuptools
+six
+sortedcontainers
+virtualenv

@@ -1,0 +1,19 @@
+[Unit]
+Description=ITRS Group Infrastructure Agent
+Documentation=https://itrsgroup.com/
+After=network.target
+# Service can only be started 'StartLimitBurst' times in 'StartLimitIntervalSec' seconds
+# This limits us to 2 restart attempts after a process exit
+StartLimitBurst=2
+StartLimitIntervalSec=25s
+
+[Service]
+Type=simple
+ExecStart=${AGENT_BIN_PATH}
+# Restart the component after the process exits, regardless of exit code
+Restart=always
+# Wait for 10 seconds before starting the component after exit
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

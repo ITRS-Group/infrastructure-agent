@@ -1,0 +1,56 @@
+# Default agent configuration vars to be used on all platforms
+# Values in here are used to build the final 'agent.default.yml' file in combination
+# with the platform specific YAML files in the platform_vars directory
+# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+
+commands: {}
+
+logging:
+  loggers:
+    main:
+      level: INFO
+    agent:
+      level: INFO
+    cache:
+      level: INFO
+    nrpe:
+      level: INFO
+
+server:
+  allowed_hosts:
+  allow_multi_packet_response: True
+  bind_address: 0.0.0.0
+  housekeeping_interval: 300
+  port: 5666
+  max_queued_connections: 30
+  max_active_connections: 15
+  max_request_time: 120
+  receive_data_timeout: 5
+  tls_enabled: True
+  tls_handshake_timeout: 3
+  tls:
+    ca_cert:
+    ca_path:
+    cert_file:
+    key_file:
+    check_client_cert: False
+    cipher_suite: 'ECDH+AESGCM:ECDH+AES256:ECDH+AES128:!aNULL:!MD5:!DSS'
+    context_options:
+      - NO_SSLv3
+      - NO_TLSv1
+      - NO_TLSv1_1
+
+execution:
+  execution_timeout: 60
+
+cachemanager:
+  host: "127.0.0.1"
+  port: 8184
+  housekeeping_interval: 60
+  timestamp_error_margin: 30
+  max_cache_size: "1GB"
+  max_item_size: 0
+
+poller_schedule: {}
+
+process_recycle_time: 86400

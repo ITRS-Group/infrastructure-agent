@@ -1,0 +1,10 @@
+# Windows specific default configuration options
+# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+---
+windows_runtimes: {}
+logging:
+  handlers:
+    file:
+      filename: C:/Program Files/Infrastructure Agent/logs/agent.log
+poller_schedule:
+  nsc_checkcpu: 10
