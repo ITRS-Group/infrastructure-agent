@@ -1,12 +1,13 @@
 # Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
 # Python libraries used by (or to build) the infrastructure-agent
 
-cryptography==39.0.2; sys_platform == 'win32'
-cryptography==2.8; sys_platform != 'win32'
-cx_Freeze==6.11.1
-gevent==21.1.2
-patchelf==0.14.5.0; sys_platform != 'win32'
-psutil==5.8.0; sys_platform == 'win32'
-pycryptodome==3.10.1
-pyyaml==5.4.1
+cffi==1.15.1
+cryptography==41.0.1
+cx-Freeze==6.15.1
+gevent==22.10.2
+patchelf==0.17.2.1; sys_platform != 'win32'
+psutil==5.9.5; sys_platform == 'win32'
+pycparser==2.21
+pycryptodome==3.18.0
+PyYAML==6.0
 sortedcontainers==2.4.0

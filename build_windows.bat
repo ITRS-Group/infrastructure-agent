@@ -37,7 +37,7 @@ if NOT DEFINED WINDOWS_PLUGIN_DIR (
     call :setplugindir %DEFAULT_WINDOWS_PLUGIN_DIR%
 )
 
-SET PLUGNPSHELL_DIR=plugnpshell
+set PLUGNPSHELL_DIR=plugnpshell
 
 set SDIR=build\exe.win-amd64-3.9
 set BUILD_EXE_DIR=%SDIR%\bin

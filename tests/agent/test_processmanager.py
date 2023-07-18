@@ -106,13 +106,13 @@ def test_kill_failed(mocker, caplog):
     assert "Failed to kill process 'test1' (pid=1)" in caplog.text
 
 
-def test_kill_no_proc(mocker, caplog):
+def test_kill_no_proc(mocker):
     mocker.patch('agent.processmanager.gevent')
     mocker.patch('agent.processmanager.Event')
     pm = ProcessManager()
     pm.get_managed_process('test1', 'path1')
-    assert(pm.recycle_all() == 0)
-    assert(pm.kill_all() == 0)
+    assert pm.recycle_all() == 0
+    assert pm.kill_all() == 0
 
 
 def test_recycle(mocker):

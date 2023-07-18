@@ -4,6 +4,8 @@
 bin
 build
 cfg/agent.default.yml
+cfg/custom
+cfg/imported.yml
 infrastructure-agent
 infrastructure-agent.service
 infrastructure-agent.tar.gz

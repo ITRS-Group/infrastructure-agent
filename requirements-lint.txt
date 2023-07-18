@@ -1,0 +1,2 @@
+# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+flake8

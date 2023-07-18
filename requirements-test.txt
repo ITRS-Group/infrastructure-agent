@@ -13,4 +13,5 @@ pyyaml
 setuptools
 six
 sortedcontainers
+tox
 virtualenv

@@ -57,6 +57,7 @@ setup(
     url="https://itrsgroup.com/",
     options={'build_exe': build_exe_options},
     executables=executables,
+    py_modules=[],
     tests_require=[
         'coverage',
         'flake8',
