@@ -114,7 +114,7 @@ class Poller:
             ENV_AGENT_POLLER_DATA: (existing_data.data or '') if existing_data else '',
         }
         logger.debug("_exec_script: About to poll '%s'", script_info.script)
-        exit_code, stdout, stderr, _ = self._script_runner.run_script(script_info.script, env)
+        exit_code, stdout, stderr, _ = self._script_runner.run_script(script_info.script, [], env)
         if exit_code == 0:
             self._cache.set(data_key, stdout, CACHE_TIME_SECS)
         else:

@@ -58,29 +58,29 @@ def test_poller_run_with_no_pollers(empty_poller, caplog):
     assert 'No pollers scheduled' in caplog.text
 
 
-@pytest.mark.parametrize('script, interval, cache_data, executed, exit_code, expected_env', [
+@pytest.mark.parametrize('script, interval, cache_data, executed, exit_code, arguments, expected_env', [
     pytest.param(
-        'script1.py', 1, 'cd1', False, 0,
+        'script1.py', 1, 'cd1', False, 0, [],
         {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
         id="Normal schedule after 1 second"
     ),
     pytest.param(
-        'script1.py', 0, 'cd1', False, 0,
+        'script1.py', 0, 'cd1', False, 0, [],
         {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
         id="Instant schedule"
     ),
     pytest.param(
-        'script1.py', 1, 'cd2', True, 0,
+        'script1.py', 1, 'cd2', True, 0, [],
         {'AGENT_POLLER_EXEC': POLLER_EXEC_CALLED, 'AGENT_POLLER_DATA': 'cd2'},
         id="Plugin called"
     ),
     pytest.param(
-        'script1.py', 1, 'cd1', False, 1,
+        'script1.py', 1, 'cd1', False, 1, [],
         {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
         id="Script error"
     ),
 ])
-def test_poller_run(mocker, script, interval, cache_data, executed, exit_code, expected_env, caplog):
+def test_poller_run(mocker, script, interval, cache_data, executed, exit_code, arguments, expected_env, caplog):
     poller_config = {script: interval}
     script_runner_mock = mocker.Mock()
     cache_mock = mocker.Mock()
@@ -105,7 +105,7 @@ def test_poller_run(mocker, script, interval, cache_data, executed, exit_code, e
         gevent_mock.sleep.assert_called_with(interval)
     else:
         gevent_mock.assert_not_called()
-    script_runner_mock.run_script.assert_called_with(script, expected_env)
+    script_runner_mock.run_script.assert_called_with(script, arguments, expected_env)
     if exit_code:
         assert 'Error code 1' in caplog.text
     else:
@@ -154,7 +154,7 @@ def test_poller_multiple_loops(mocker, poller_config, loops, exec_calls, sleep_c
     script_runner_mock.run_script.return_value = [0, '', '', False]
     with pytest.raises(BreakException):
         poller.run()
-    script_calls = [call(s, mocker.ANY) for s in exec_calls]
+    script_calls = [call(s, [], mocker.ANY) for s in exec_calls]
     script_runner_mock.run_script.assert_has_calls(script_calls)
     sleep_calls = [call(s) for s in sleep_calls]
     gevent_mock.sleep.assert_has_calls(sleep_calls)
