@@ -1,7 +1,7 @@
 # Default agent configuration vars to be used on all platforms
 # Values in here are used to build the final 'agent.default.yml' file in combination
 # with the platform specific YAML files in the platform_vars directory
-# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+# Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 
 commands: {}
 

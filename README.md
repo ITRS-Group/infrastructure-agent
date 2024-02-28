@@ -16,7 +16,7 @@ under the terms of the license described in [**LICENSE**](LICENSE).
 ## Pre-built Packages
 The Infrastructure Agent can be easily installed from a pre-compiled package on
 a variety of Linux distributions and Windows. These packages can be downloaded
-from the [Opsview website](https://www.opsview.com/product/downloads#agents).
+from the [Opsview website](https://opsview.com/product/downloads#agents).
 
 ## From Source
 The Infrastructure Agent and its bundled plugins can also be built from source.

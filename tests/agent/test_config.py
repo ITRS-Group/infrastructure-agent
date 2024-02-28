@@ -1,6 +1,6 @@
 """
 Infrastructure Agent: Unit tests for config classes and functions.
-Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
 import os
 import pytest

@@ -1,6 +1,6 @@
 """
 Windows Service Configuration File
-Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
 
 # ------------------------------------------------------------------------------

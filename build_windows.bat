@@ -1,5 +1,5 @@
 :: Windows Installer MSI builder script
-:: Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+:: Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 
 @echo off
 

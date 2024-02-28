@@ -1,6 +1,6 @@
 """
 Infrastructure Agent: Setup configuration
-Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
 
 import os
@@ -21,7 +21,7 @@ except FileNotFoundError:
     VERSION = '0.0.0'  # Probably from `make test` or similar
 
 EXECUTABLE_CONFIG = {
-    "copyright": "Copyright 2023 ITRS Group Ltd.",
+    "copyright": "Copyright 2024 ITRS Group Ltd.",
     "icon": "icon.ico"
 }
 
@@ -53,7 +53,7 @@ setup(
     version=VERSION,
     description="Infrastructure Agent",
     author="ITRS Group Ltd",
-    author_email="support@itrsgroup.com",
+    author_email="",
     url="https://itrsgroup.com/",
     options={'build_exe': build_exe_options},
     executables=executables,

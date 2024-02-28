@@ -1,5 +1,5 @@
 # Makefile for ITRS Group infrastructure-agent
-# Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+# Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 
 VENV ?= venv
 BASE_DIR ?= infrastructure-agent

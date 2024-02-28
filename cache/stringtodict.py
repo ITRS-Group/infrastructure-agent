@@ -1,6 +1,6 @@
 """
 Infrastructure Agent: Utility function to convert a string to a dictionary
-Copyright (C) 2003-2023 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
 
 from __future__ import annotations
