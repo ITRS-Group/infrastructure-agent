@@ -14,6 +14,8 @@ ExecStart=${AGENT_BIN_PATH}
 Restart=always
 # Wait for 10 seconds before starting the component after exit
 RestartSec=10s
+User=infra-agent
+Group=infra-agent
 
 [Install]
 WantedBy=multi-user.target

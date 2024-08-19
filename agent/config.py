@@ -32,6 +32,7 @@ IMPORTED_CONFIG_NAME = 'imported.yml'
 CONFIG_DIR_NAME = 'cfg'
 VAR_DIR_NAME = 'var'
 USER_CONFIG_REL_PATH = CONFIG_DIR_NAME + '/custom/agent.yml'
+STARTUP_LOG_REL_PATH = VAR_DIR_NAME + '/startup.log'
 USER_CONFIG_SUBDIR = 'custom'
 YAML_EXTENSIONS = {'yml', 'yaml'}
 TRUE_STRINGS = ('true', 'y', 'yes', '1')
@@ -301,6 +302,11 @@ def get_agent_root() -> Path:  # pragma: no cover
     relative_path = RELATIVE_BASE_PATH_FROZEN if getattr(sys, 'frozen', False) else RELATIVE_BASE_PATH_SRC
     base_path = Path(__file__).parent
     return base_path / relative_path
+
+
+def get_startup_log_path() -> str:
+    """Returns the path of startup.log file"""
+    return str((get_agent_root() / STARTUP_LOG_REL_PATH).resolve())
 
 
 def create_default_user_config_if_required() -> bool:

@@ -169,7 +169,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
         backend=default_backend(),
     )
     # Create the private key file (only readable/writable by current user)
-    with open(private_key_path, 'wb', opener=open_with_mode(0o600)) as f:
+    with open(private_key_path, 'wb', opener=open_with_mode(0o640)) as f:
         f.write(private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,

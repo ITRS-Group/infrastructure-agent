@@ -18,6 +18,7 @@ from agent.config import (
     ExecutionConfig,
     AgentConfig,
     ConfigurationError,
+    get_startup_log_path,
 )
 
 MUL_KB = 1024
@@ -229,10 +230,13 @@ def test_agentconfig_from_dict(config_dict, expected, exception):
         pytest.param('noversion', 0, 9997, '0.0.0', None, False, id="noversion"),
     ])
 def test_get_config(cfgdir, cm_max_item_size, server_port, expected_version, path, debug_print):
+    STARTUP_LOG_PATH = 'var/startup.log'
     os.environ['AGENT_DUMP_FINAL_CONFIG'] = "y" if debug_print else "n"
     configs = __file__.replace('agent/test_config.py', f'resources/{cfgdir}/foo/bar.py')
     with patch('agent.config.__file__', configs):
         cfg = get_config()
+        startup_log_cfg = get_startup_log_path()
+    assert STARTUP_LOG_PATH in startup_log_cfg
     assert cfg.cachemanager.max_item_size == cm_max_item_size
     assert cfg.server.port == server_port
     assert cfg.version == expected_version

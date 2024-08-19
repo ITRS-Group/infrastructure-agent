@@ -205,7 +205,7 @@ def test_ssl_helper_create_self_signed_cert():
         output_dir = os.path.join(d, 'var')
         key_file, cert_file = agent.ssl_helper.create_self_signed_cert('server', output_dir)
         assert os.path.isdir(output_dir)
-        assert (os.stat(key_file).st_mode & 0o777) == 0o600
+        assert (os.stat(key_file).st_mode & 0o777) == 0o640
         assert (os.stat(cert_file).st_mode & 0o777) == 0o644
 
 

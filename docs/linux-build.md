@@ -39,6 +39,7 @@
 * Run the compilation command, passing in the path of your Python binary
 ```shell
 # Note: 'sudo' is needed to compile plugins from monitoring-plugins
+# This will also create an 'infra-agent' user and group on the build machine
 sudo make clean tar PYTHON=/usr/bin/python3.9
 ```
 * The compiled agent can be found at `infrastructure-agent.tar.gz`.
@@ -47,13 +48,19 @@ sudo make clean tar PYTHON=/usr/bin/python3.9
 * Copy the compiled tarball to the target machine and extract it to the desired installation directory.
   In this example, the default location of `/opt/itrs/infrastructure-agent` is used:
 ```shell
-# On the target machine, running as the sudo user
 mkdir /opt/itrs
+chown root:infra-agent /opt/itrs
 tar -xf infrastructure-agent.tar.gz -C /opt/itrs/
 ```
 * Validate that the agent works by calling the executable directly. Note that it should error out due to configuration issues.
 ```shell
 /opt/itrs/infrastructure-agent/bin/infrastructure-agent
+```
+* To make sure all plugins that require root execution work as expected, it is necessary to mark them with the 'SUID' permission with the following command. The following should also be applied to any custom plugins that need to be executed as root:
+```shell
+# Setuid for special plugins
+chmod u+s /opt/itrs/infrastructure-agent/plugins/check_dhcp
+chmod u+s /opt/itrs/infrastructure-agent/plugins/check_icmp
 ```
 * Set up the `systemd` service.
 ```shell

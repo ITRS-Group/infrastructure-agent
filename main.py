@@ -12,7 +12,7 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
-from agent.config import get_config, create_default_user_config_if_required
+from agent.config import get_config, create_default_user_config_if_required, get_startup_log_path
 from agent.logger import init_logging
 from config_importer import import_config_if_required
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger: logging.Logger = None
 infrastructure_agent: Agent = None
 
-STARTUP_LOG_FILE = 'startup.log'
+STARTUP_LOG_FILE = get_startup_log_path()
 
 
 def start_agent(config: AgentConfig) -> int:

@@ -1,6 +1,9 @@
 # Makefile for ITRS Group infrastructure-agent
 # Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 
+USER = root
+GROUP = infra-agent
+
 VENV ?= venv
 BASE_DIR ?= infrastructure-agent
 AGENT_DIR ?= /opt/itrs/infrastructure-agent
@@ -115,7 +118,19 @@ build: agent plugins $(AGENT_SERVICE_FILE) $(CFG) $(VAR_DIR)
 	cp $(AGENT_SERVICE_FILE) $(INSTALLER_DIR)
 	cp -rv $(PLUGIN_DIR)/out/perl $(PLUGIN_DIR)/out/plugins/* $(PLUGIN_INSTALL_DIR)
 
-tar: $(VENV) build
+create-user:
+	sudo ./create_user.sh
+
+set-permission: create-user
+	chown -R $(USER):$(GROUP) $(BASE_DIR)
+	chmod -R 750 $(BUILD_EXE_DIR)
+	chmod -R 550 $(PLUGIN_INSTALL_DIR)
+	chmod -R 770 $(CFG_DIR)
+	chmod -R 770 $(CFG_CUSTOM_DIR)
+	chmod -R 770 $(VAR_DIR)
+	chmod 440 $(INSTALLER_DIR)/$(AGENT_SERVICE_FILE)
+
+tar: $(VENV) build set-permission
 	@# Generate the tar file
 	tar -cvzf $(TAR_FILE) $(BASE_DIR)
 
@@ -132,4 +147,4 @@ ifneq ("$(wildcard $(PLUGIN_DIR))", "")
 	$(MAKE) -C $(PLUGIN_DIR) clean
 endif
 
-.PHONY: all lint test agent build install plugins clean tar check_python_version
+.PHONY: all lint test agent build create-user set-permission install plugins clean tar check_python_version
