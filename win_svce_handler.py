@@ -10,6 +10,7 @@ import psutil
 import subprocess
 import sys
 import time
+from returncodes import RETURN_CODE_CONFIG_ERROR
 
 AGENT_WORKER_EXE = 'infra-agent.exe'
 PROCESS_REST_SECS = 10
@@ -39,6 +40,9 @@ class WinSvceHandler:
                 env['PYTHONUTF8'] = "1"
                 self._worker_process = subprocess.Popen([AGENT_WORKER_EXE], cwd=working_dir, env=env)
                 self._worker_process.communicate()
+                if self._worker_process.returncode == RETURN_CODE_CONFIG_ERROR:
+                    logger.error("Agent worker process ended with config error and cannot continue")
+                    break
                 self._worker_process = None
                 logger.error("Agent worker process ended early. Waiting for %ss before re-starting", PROCESS_REST_SECS)
                 time.sleep(PROCESS_REST_SECS)

@@ -130,13 +130,13 @@ def log_dict(level: int, dict_object: dict, dict_name: str):
         logger.log(level, "%s%s: %s", prefix, k, v)
 
 
-def log_object_attr(level: int, object: Any, object_name: str):
+def log_object_attr(level: int, obj: Any, object_name: str):
     """
     Logs the content of an arbitrary Python object to the requested level
     NOTE: The object must have a .__dict__ attribute for this function to work
     """
     logger.log(level, object_name)
-    dir_len = len(dir(object))
-    for i, attr in enumerate(sorted(dir(object))):
+    dir_len = len(dir(obj))
+    for i, attr in enumerate(sorted(dir(obj))):
         prefix = '├─ ' if i + 1 != dir_len else '└─ '
-        logger.log(level, "%s%s: %s", prefix, attr, getattr(object, attr))
+        logger.log(level, "%s%s: %s", prefix, attr, getattr(obj, attr))

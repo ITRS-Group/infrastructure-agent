@@ -2,28 +2,37 @@
 Infrastructure Agent: Unit tests for config classes and functions.
 Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
+import contextlib
 import os
-import pytest
-import tempfile
-from mock import patch
 from pathlib import Path
+
+import pytest
 
 from agent.config import (
     DEFAULT_USER_CONFIG_CONTENT,
+    STARTUP_LOG_REL_PATH,
+    AbstractConfig,
+    AgentConfig,
+    CommandConfig,
+    ConfigurationError,
+    ExecutionConfig,
+    ExecutionStyle,
     create_default_user_config_if_required,
     get_config,
-    parse_byte_string,
-    AbstractConfig,
-    CommandConfig,
-    ExecutionConfig,
-    AgentConfig,
-    ConfigurationError,
     get_startup_log_path,
+    parse_byte_string,
 )
 
 MUL_KB = 1024
 MUL_MB = MUL_KB * 1024
 MUL_GB = MUL_MB * 1024
+
+PATCH_PREFIX = 'agent.config.'
+
+
+@pytest.fixture(autouse=True)
+def _set_startup_log(mocker):
+    mocker.patch(PATCH_PREFIX + 'startup_log', return_value=lambda *args, **kwargs: print(*args, kwargs))
 
 
 @pytest.mark.parametrize(
@@ -131,51 +140,162 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         assert expected in str(exp)
 
 
-@pytest.mark.parametrize(
-    'config_dict, expected, exception', [
-        pytest.param(
-            {'foo': {'path': 'P'}},
-            {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=False, NAME='commands')},
-            None,
-            id="success"),
-        pytest.param(
-            {'foo': {'path': 'P', 'runtime': 'R'}},
-            {'foo': CommandConfig(name='foo', path='P', runtime='R', cache_manager=False, NAME='commands')},
-            None,
-            id="success_with_runtime"),
-        pytest.param(
-            {'foo': {'path': 'P', 'cache_manager': True}},
-            {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=True, NAME='commands')},
-            None,
-            id="success_using_cache_manager"),
-        pytest.param(
-            {'foo': {'runtime': 'R'}},
-            "Missing 'commands' configuration for 'foo', section: 'path'",
-            ConfigurationError,
-            id="missing_path"),
-        pytest.param(
-            {'foo': {'path': 'P', 'long_running_key': '$PATH$'}},
-            {'foo': CommandConfig(name='foo', path='P', runtime=None, long_running_key='P', use_stdin=True)},
-            None,
-            id="long_running_key_path"),
-        pytest.param(
-            {'foo': {'path': 'P', 'long_running_key': '$NAME$'}},
-            {'foo': CommandConfig(name='foo', path='P', runtime=None, long_running_key='foo', use_stdin=True)},
-            None,
-            id="long_running_key_name"),
-        pytest.param(
-            {'foo': {'path': 'P', 'long_running_key': '$NAME$', 'use_stdin': False}},
-            "Long running key 'foo' for command 'foo' cannot have 'use_stdin=false'",
-            ConfigurationError,
-            id="long_running_key_stdin_err"),
-    ])
+@pytest.mark.parametrize('config_dict, expected, exception', [
+    pytest.param(
+        {'foo': {'path': 'P'}},
+        {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=False, NAME='commands')},
+        None,
+        id="success"),
+    pytest.param(
+        {'foo': {'path': 'P', 'runtime': 'R'}},
+        {'foo': CommandConfig(name='foo', path='P', runtime='R', cache_manager=False, NAME='commands')},
+        None,
+        id="success_with_runtime"),
+    pytest.param(
+        {'foo': {'path': 'P', 'cache_manager': True}},
+        {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=True, NAME='commands')},
+        None,
+        id="success_using_cache_manager"),
+    pytest.param(
+        {'foo': {'runtime': 'R'}},
+        "Missing 'commands' configuration for 'foo', section: 'path'",
+        ConfigurationError,
+        id="missing_path"),
+    pytest.param(
+        {
+            'foo': {
+                'path': 'P', 'long_running_key': '$PATH$',
+                'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value
+            }
+        },
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None,
+                long_running_key='P', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS)
+        },
+        None,
+        id="long_running_key_path"),
+    pytest.param(
+        {
+            'foo': {
+                'path': 'P', 'long_running_key': '$NAME$',
+                'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value
+            }
+        },
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None,
+                long_running_key='foo', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+            )
+        },
+        None,
+        id="long_running_key_name"),
+    pytest.param(
+        {'foo': {'path': 'P', 'long_running_key': '$NAME$'}},
+        "long_running_key specified for command 'foo' but execution_style is not set to 'LONGRUNNING_STDIN_ARGS'",
+        ConfigurationError,
+        id="long_running_key_exe_style_err"),
+    pytest.param(
+        {'foo': {'path': 'P', 'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value}},
+        "long_running_key not specified for command 'foo' but execution_style is set to 'LONGRUNNING_STDIN_ARGS'",
+        ConfigurationError,
+        id="exe_style_no_long_running_key_err"),
+    pytest.param(
+        {'foo': {'path': 'P', 'execution_style': 'bar'}},
+        "Invalid execution_style for command 'foo': bar",
+        ConfigurationError,
+        id="invalid_execution_style"),
+
+    # use_stdin legacy paths
+    # No execution_style set
+    pytest.param(
+        {'foo': {'path': 'P', 'use_stdin': False}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
+                execution_style=ExecutionStyle.COMMAND_LINE_ARGS
+            )
+        },
+        None,
+        id="old_use_stdin_false_no_style"),
+    pytest.param(
+        {'foo': {'path': 'P', 'use_stdin': True}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
+                execution_style=ExecutionStyle.STDIN_ARGS
+            )
+        },
+        None,
+        id="old_use_stdin_true_no_style"),
+
+    # COMMAND_LINE_ARGS execution_style set
+    pytest.param(
+        {'foo': {'use_stdin': True, 'path': 'P', 'execution_style': ExecutionStyle.COMMAND_LINE_ARGS.value}},
+        "'use_stdin' is deprecated AND is set to True for command 'foo' with a non-stdin execution_style "
+        "(COMMAND_LINE_ARGS). Please only set 'execution_style'.",
+        ConfigurationError,
+        id="old_use_stdin_true_cmd_style"),
+
+    pytest.param(
+        {'foo': {'use_stdin': False, 'path': 'P', 'execution_style': ExecutionStyle.COMMAND_LINE_ARGS.value}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
+                execution_style=ExecutionStyle.COMMAND_LINE_ARGS
+            )
+        },
+        None,
+        id="old_use_stdin_false_cmd_style"),
+
+    # STDIN_ARGS execution_style set
+    pytest.param(
+        {'foo': {'use_stdin': True, 'path': 'P', 'execution_style': ExecutionStyle.STDIN_ARGS.value}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
+                execution_style=ExecutionStyle.STDIN_ARGS
+            )
+        },
+        None,
+        id="old_use_stdin_true_stdin_style"),
+
+    pytest.param(
+        {'foo': {'use_stdin': False, 'path': 'P', 'execution_style': ExecutionStyle.STDIN_ARGS.value}},
+        "'use_stdin' is deprecated AND is set to False for command 'foo' with a stdin execution_style "
+        "(STDIN_ARGS). Please only set 'execution_style'.",
+        ConfigurationError,
+        id="old_use_stdin_false_stdin_style"),
+
+    # LONGRUNNING_STDIN_ARGS execution_style set
+    pytest.param(
+        {
+            'foo': {
+                'use_stdin': True, 'path': 'P',
+                'long_running_key': '$PATH', 'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value
+            }
+        },
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
+                long_running_key='$PATH', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+            )
+        },
+        None,
+        id="old_use_stdin_true_lr_stdin_style"),
+
+    pytest.param(
+        {'foo': {'use_stdin': False, 'path': 'P', 'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value}},
+        "'use_stdin' is deprecated AND is set to False for command 'foo' with a stdin execution_style "
+        "(LONGRUNNING_STDIN_ARGS). Please only set 'execution_style'.",
+        ConfigurationError,
+        id="old_use_stdin_false_lr_stdin_style"),
+])
 def test_commandconfig_from_dict(config_dict, expected, exception):
-    if not exception:
+    with pytest.raises(exception) if exception else contextlib.nullcontext() as e:
         assert CommandConfig.from_dict(config_dict) == expected
-    else:
-        with pytest.raises(exception) as exp:
-            CommandConfig.from_dict(config_dict)
-        assert expected in str(exp)
+    if exception:
+        assert expected in str(e)
 
 
 @pytest.mark.parametrize('path, expected_parsed_path, expected_max_unique_arg_index', [
@@ -203,7 +323,7 @@ def test_commandconfig_from_dict(config_dict, expected, exception):
 def test_commandconfig_arg_parsing(path, expected_parsed_path, expected_max_unique_arg_index):
     config = CommandConfig(
         name='check_foo', path=path, runtime=None, cache_manager=False,
-        stderr=False, long_running_key=None, use_stdin=False
+        stderr=False, long_running_key=None
     )
     assert config.path == expected_parsed_path
     assert config.max_unique_arg_index == expected_max_unique_arg_index
@@ -229,14 +349,12 @@ def test_agentconfig_from_dict(config_dict, expected, exception):
         pytest.param('extra', 42, 2112, '1.2.3', '/path/to/item', False, id="extra"),
         pytest.param('noversion', 0, 9997, '0.0.0', None, False, id="noversion"),
     ])
-def test_get_config(cfgdir, cm_max_item_size, server_port, expected_version, path, debug_print):
-    STARTUP_LOG_PATH = 'var/startup.log'
+def test_get_config(cfgdir, cm_max_item_size, server_port, expected_version, path, debug_print, mocker):
     os.environ['AGENT_DUMP_FINAL_CONFIG'] = "y" if debug_print else "n"
     configs = __file__.replace('agent/test_config.py', f'resources/{cfgdir}/foo/bar.py')
-    with patch('agent.config.__file__', configs):
-        cfg = get_config()
-        startup_log_cfg = get_startup_log_path()
-    assert STARTUP_LOG_PATH in startup_log_cfg
+    mocker.patch(PATCH_PREFIX + '__file__', configs)
+    cfg = get_config(logger=mocker.Mock())
+
     assert cfg.cachemanager.max_item_size == cm_max_item_size
     assert cfg.server.port == server_port
     assert cfg.version == expected_version
@@ -246,22 +364,26 @@ def test_get_config(cfgdir, cm_max_item_size, server_port, expected_version, pat
         assert len(cfg.commands) == 0
 
 
+def test_get_startup_log_path():
+    assert STARTUP_LOG_REL_PATH in str(get_startup_log_path())
+
+
 @pytest.mark.parametrize(
     'existing_content, expected_content', [
         pytest.param(None, DEFAULT_USER_CONFIG_CONTENT, id="new-config"),
         pytest.param('existing', 'existing', id="existing-config"),
     ])
-def test_create_default_user_config(mocker, existing_content: str, expected_content: str):
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        base_dir = Path(tmp_dir)
-        cfg_path = base_dir / 'cfg/custom/agent.yml'
-        if existing_content:
-            os.makedirs(cfg_path.parent)
-            with open(cfg_path, 'w') as f:
-                f.write(existing_content)
-        mocker.patch('agent.config.get_agent_root', return_value=base_dir)
-        should_create_config_file = (existing_content is None)
-        assert create_default_user_config_if_required() == should_create_config_file
-        assert os.path.isfile(cfg_path)
-        with open(cfg_path, 'r') as f:
-            assert f.read() == expected_content
+def test_create_default_user_config(mocker, existing_content: str, expected_content: str, tmp_path: Path):
+    cfg_path = tmp_path / 'cfg/custom/agent.yml'
+
+    if existing_content:
+        cfg_path.parent.mkdir(parents=True)
+        with cfg_path.open('w') as f:
+            f.write(existing_content)
+
+    mocker.patch(PATCH_PREFIX + 'get_agent_root', return_value=tmp_path)
+    should_create_config_file = (existing_content is None)
+    assert create_default_user_config_if_required() == should_create_config_file
+    assert cfg_path.is_file()
+    with cfg_path.open('r') as f:
+        assert f.read() == expected_content

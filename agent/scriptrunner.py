@@ -12,20 +12,23 @@ import logging
 import os
 import shlex
 import signal
-from typing import TYPE_CHECKING, Optional, Callable
+from typing import TYPE_CHECKING
 
 import gevent
 from gevent import subprocess
 from gevent.lock import BoundedSemaphore
 from gevent.subprocess import PIPE, TimeoutExpired
 
+from .config import ExecutionStyle
 from .processmanager import ProcessManager
 
 if TYPE_CHECKING:
+    from typing import Callable, Optional
+    from gevent.greenlet import Greenlet
+
     from .cachemanager import CacheManager
     from .config import CommandConfig, ExecutionConfig
     from .objects import Platform
-    from gevent.greenlet import Greenlet
 
 EMPTY_CHECK = "_NRPE_CHECK"
 ENV_LONG_RUNNING_PROCESS = 'LONG_RUNNING_PROCESS'
@@ -147,11 +150,12 @@ class ScriptRunner:
         logger.debug("Executing %s", args)
         stdin_data: Optional[bytes] = None
         proc_lock: Optional[BoundedSemaphore] = None
+
         try:
-            if command.use_stdin:
-                command_path = args[0]
+            command_path = args[0]
+            if command.uses_stdin:
                 env: dict = kwargs['env']
-                if command.long_running_key:
+                if command.execution_style == ExecutionStyle.LONGRUNNING_STDIN_ARGS:
                     proc, proc_lock = self.process_manager.get_managed_process(command.long_running_key, command_path)
                     env[ENV_LONG_RUNNING_PROCESS] = '1'
                 else:
@@ -161,11 +165,12 @@ class ScriptRunner:
                     stdin_obj = {'cmd': args[1:], 'env': env}
                     stdin_data = json.dumps(stdin_obj).encode('utf-8')
             else:
+                # execution_style is ExecutionStyle.COMMAND_LINE_ARGS:
                 proc = subprocess.Popen(args, **kwargs)
         except FileNotFoundError:
-            raise FileNotFoundError(f"Cannot find command: '{args[0]}'")
-        pid = proc.pid
+            raise FileNotFoundError(f"Cannot find command: '{command_path}'")
 
+        pid = proc.pid
         max_wait_secs = self.execution_config.execution_timeout
         clean_stdout = ''
         clean_stderr: str
@@ -175,12 +180,12 @@ class ScriptRunner:
                 if command.long_running_key:
                     proc.stdin.flush()
             exit_code, clean_stdout, stderr = self._read_output(
-                plugin, proc, command.use_stdin, command.long_running_key, timeout=max_wait_secs)
+                plugin, proc, command.uses_stdin, command.long_running_key, timeout=max_wait_secs
+            )
             clean_stderr = stderr if command.stderr else ''
             early_timeout = False
         except TimeoutExpired:
             # Attempt to end the process gracefully (sending SIGTERM),
-            gid: int = 0 if self.platform.is_windows else os.getpgid(pid)
             proc.terminate()
             command_name: str = args[0] if len(args) > 0 else ''
             gevent.sleep(1)
@@ -189,9 +194,10 @@ class ScriptRunner:
             if poll is None:
                 # kill it (SIGKILL) and all its child processes
                 if self.platform.is_windows:
-                    os.kill(pid)
+                    # SIGKILL doesn't exist on Windows, send a CTRL_C_EVENT signal instead
+                    os.kill(pid, signal.CTRL_C_EVENT)
                 else:
-                    os.killpg(gid, signal.SIGKILL)  # Kill the process group (all children)
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)  # Kill the process group (all children)
                 add_text = " (and was killed)"
             logger.error("Process '%s' did not exit within %s seconds%s.", command_name, max_wait_secs, add_text)
             clean_stderr = f"ERROR: Command '{plugin}' did not exit within {max_wait_secs} seconds{add_text}."
@@ -209,7 +215,7 @@ class ScriptRunner:
         timer = gevent.Timeout(timeout)
         stdout_buffer = bytearray()
         stderr_buffer = bytearray()
-        capture_greenlets: list[Greenlet] = None
+        capture_greenlets: list[Greenlet] = []
         timer.start()
         try:
             if long_running_key:

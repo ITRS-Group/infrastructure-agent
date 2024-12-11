@@ -16,7 +16,7 @@ from cache.exceptions import ConfigError
 from .scriptrunner import ScriptRunner
 
 if TYPE_CHECKING:
-    from cache.expirycache import ExpiryCache, CacheEntry
+    from cache.expirycache import ExpiryCache
 
 
 POLLER_DATA_PREFIX = 'PollerData'
@@ -65,7 +65,7 @@ class Poller:
         if script_name not in self._poller_config:
             return {}
         data_key: str = f'{POLLER_DATA_PREFIX}|{script_name}'
-        existing_data: CacheEntry = self._cache.get(data_key)
+        existing_data = self._cache.get(data_key)
         usage_key: str = f'{POLLER_EXEC_PREFIX}|{script_name}'
         now: int = int(time.time())
         logger.debug("Marking script '%s' as executed", script_name)
@@ -104,7 +104,7 @@ class Poller:
     def _exec_script(self, script_name: str, current_slot: int):
         """Executes the specified script"""
         data_key: str = f'{POLLER_DATA_PREFIX}|{script_name}'
-        existing_data: CacheEntry = self._cache.get(data_key)
+        existing_data = self._cache.get(data_key)
         usage_key: str = f'{POLLER_EXEC_PREFIX}|{script_name}'
         called_flag = self._cache.get(usage_key)
         self._cache.delete(usage_key)

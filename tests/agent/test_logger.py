@@ -12,7 +12,7 @@ from agent.config import ConfigurationError
 
 @pytest.fixture(autouse=True)
 def patch_logger(mocker):
-    mocker.patch('agent.logger.logger')
+    yield mocker.patch('agent.logger.logger')
 
 
 @pytest.mark.parametrize(
@@ -45,9 +45,9 @@ def test_logger_init_logging(config, exception, mocker):
             id="one_level",
         ),
     ])
-def test_logger_log_dict(data, expected):
+def test_logger_log_dict(data, expected, patch_logger):
     agent.logger.log_dict(99, data, 'foo')
-    assert agent.logger.logger.log.call_args_list == expected
+    assert patch_logger.log.call_args_list == expected
 
 
 class X:
@@ -66,7 +66,7 @@ class X:
             id="simple_object",
         ),
     ])
-def test_logger_log_object_attr(data, expected):
+def test_logger_log_object_attr(data, expected, patch_logger):
     agent.logger.log_object_attr(42, data, 'bar')
     for callarg in expected:
-        assert callarg in agent.logger.logger.log.call_args_list
+        assert callarg in patch_logger.log.call_args_list

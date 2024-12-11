@@ -3,19 +3,28 @@ Infrastructure Agent: Expiry cache
 Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 import time
-from gevent.event import Event
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict
+from typing import NamedTuple, TYPE_CHECKING
 
+from gevent.event import Event
 from sortedcontainers import SortedDict
 
 from .exceptions import CacheTTLError, CacheItemSizeError
 
-CacheEntry = namedtuple('CacheEntry', ['data', 'expiry'])
+if TYPE_CHECKING:
+    from typing import Union
 
 logger = logging.getLogger(__name__)
+
+
+class CacheEntry(NamedTuple):
+    data: str
+    expiry: int
 
 
 class ExpiryCache:
@@ -58,9 +67,9 @@ class ExpiryCache:
         self._keys_by_expiry.setdefault(expiry, set()).add(key)
         self._update_total_size(item_size)
 
-    def get(self, key: str) -> str:
+    def get(self, key: str) -> Union[CacheEntry, None]:
         """Retrieves a previously cached item (unless it has expired)."""
-        data_block: bytes = self._data_cache.get(key)
+        data_block = self._data_cache.get(key)
         if data_block:
             if data_block.expiry > int(time.time()):
                 return data_block

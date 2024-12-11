@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 SCRIPT_DIR = os.path.dirname(__file__)
 VERSION_TEMPLATE_FILE = os.path.join(SCRIPT_DIR, 'AGENT_VERSION')
@@ -73,7 +73,8 @@ def get_version(optional_dirs: list[str]) -> str:
     if not commit_timestamp:
         commit_timestamp = int(time.time())
 
-    commit_datetime = datetime.utcfromtimestamp(int(commit_timestamp))
+    commit_datetime = datetime.fromtimestamp(commit_timestamp, tz=timezone.utc)
+
     hour_of_year = calc_hour_of_year(commit_datetime)
     year_mod_5 = commit_datetime.year % 5
     commit_tag = f'{year_mod_5}{hour_of_year:04}'

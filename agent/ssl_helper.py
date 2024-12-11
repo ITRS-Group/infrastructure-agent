@@ -5,21 +5,21 @@ Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 
 from __future__ import annotations
 
-import datetime
 import logging
 import os
 import socket
 import ssl
 import subprocess
-from agent.config import get_agent_root
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+
+from agent.config import get_agent_root
 
 if TYPE_CHECKING:
     from agent.config import TLSConfig
@@ -169,7 +169,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
         backend=default_backend(),
     )
     # Create the private key file (only readable/writable by current user)
-    with open(private_key_path, 'wb', opener=open_with_mode(0o640)) as f:
+    with open(private_key_path, 'wb', opener=open_with_mode(0o600)) as f:
         f.write(private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
@@ -183,7 +183,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
         x509.NameAttribute(NameOID.COMMON_NAME, hostname),
     ])
 
-    now = datetime.datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Create the certificate
     cert = x509.CertificateBuilder().subject_name(
@@ -197,7 +197,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
     ).not_valid_before(
         now
     ).not_valid_after(
-        now + datetime.timedelta(days=100 * 365)  # Good for a long time
+        now + timedelta(days=100 * 365)  # Good for a long time
     ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName('localhost')]),
         critical=False,

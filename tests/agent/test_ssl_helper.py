@@ -2,18 +2,19 @@
 Infrastructure Agent: Unit tests for logger
 Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 """
-import agent.ssl_helper
+
 import errno
 import os.path
-import pytest
 import socket
 import ssl
 import subprocess
-from agent.config import TLSConfig
 from contextlib import contextmanager
+
+import pytest
 from mock import call
-from pathlib import Path
-from tempfile import TemporaryDirectory
+
+import agent.ssl_helper
+from agent.config import TLSConfig
 
 
 @contextmanager
@@ -200,27 +201,26 @@ def test_ssl_helper_ssl_debug_message_callback(mocker, caplog):
     assert '| tls message dir   | ver     | msg                  | cnt                 \n' in caplog.text
 
 
-def test_ssl_helper_create_self_signed_cert():
-    with TemporaryDirectory() as d:
-        output_dir = os.path.join(d, 'var')
-        key_file, cert_file = agent.ssl_helper.create_self_signed_cert('server', output_dir)
-        assert os.path.isdir(output_dir)
-        assert (os.stat(key_file).st_mode & 0o777) == 0o640
-        assert (os.stat(cert_file).st_mode & 0o777) == 0o644
+def test_ssl_helper_create_self_signed_cert(tmp_path):
+    output_dir = tmp_path / 'var'
+    key_file, cert_file = agent.ssl_helper.create_self_signed_cert('server', output_dir)
+    assert output_dir.is_dir()
+    assert (os.stat(key_file).st_mode & 0o777) == 0o600
+    assert (os.stat(cert_file).st_mode & 0o777) == 0o644
 
 
-def test_ssl_helper_create_self_signed_cert_exists():
+def test_ssl_helper_create_self_signed_cert_exists(tmp_path):
     config_name = 'server'
     base_name = f'{socket.gethostname()}-{config_name}'
-    with TemporaryDirectory() as d:
-        output_path = Path(d) / 'var'
-        os.makedirs(output_path)
-        orig_key_path = (output_path / base_name).with_suffix('.key')
-        orig_cert_path = (output_path / base_name).with_suffix('.crt')
-        orig_key_path.touch()
-        orig_cert_path.touch()
-        key_file, cert_file = agent.ssl_helper.create_self_signed_cert(config_name, output_path)
-        assert key_file == orig_key_path
-        assert cert_file == orig_cert_path
-        assert os.path.getsize(key_file) == 0
-        assert os.path.getsize(cert_file) == 0
+
+    output_path = tmp_path / 'var'
+    output_path.mkdir(parents=True)
+    orig_key_path = (output_path / base_name).with_suffix('.key')
+    orig_cert_path = (output_path / base_name).with_suffix('.crt')
+    orig_key_path.touch()
+    orig_cert_path.touch()
+    key_file, cert_file = agent.ssl_helper.create_self_signed_cert(config_name, output_path)
+    assert key_file == orig_key_path
+    assert cert_file == orig_cert_path
+    assert os.path.getsize(key_file) == 0
+    assert os.path.getsize(cert_file) == 0

@@ -168,14 +168,16 @@ class NRPEListener:
 
             # Handle the request
             try:
-                greenlet = spawn(self.connection_handler, conn, host, peername)
-                self._connected_sockets[peername] = (conn, greenlet)
+                self._connected_sockets[peername] = (
+                    conn,
+                    spawn(self.connection_handler, conn, host, peername)
+                )
             except Exception as ex:
                 # Catch-all to make sure we close the connection if something bad happens
                 logger.error("Error while spawning command: %s", ex)
                 conn.close()
 
-    def accept_connection(self):
+    def accept_connection(self) -> tuple[Union[socket.socket, SSLSocket], str]:
         """Accept and validate a connection"""
 
         def _reject_connection(conn: socket.socket, reason: str):
@@ -185,7 +187,7 @@ class NRPEListener:
                 conn.close()
             return (None, None)
 
-        conn: socket.socket = None
+        conn: Union[socket.socket, SSLSocket] = None
         client_cert: dict = None
         host: str = '<unknown>'
         try:

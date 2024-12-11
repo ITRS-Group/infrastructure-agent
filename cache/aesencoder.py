@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import base64
 import os
+from typing import TYPE_CHECKING
 
 from Crypto.Cipher import AES
 from Crypto.Hash import HMAC, SHA256
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from typing import Optional, Union
+    from typing import Union
 
 
 class AesEncoder:
@@ -21,7 +21,7 @@ class AesEncoder:
     AES_BLOCK_SIZE = 16  # 128 bits
     SIG_SIZE = SHA256.digest_size
 
-    def __init__(self, base64_key: Optional[bytes] = None):
+    def __init__(self, base64_key: Union[bytes, str, None] = None):
         # Create a list of the decoded values of all keys in base64_key
         if base64_key is None:
             self.keys = [os.urandom(AesEncoder.AES_BLOCK_SIZE)]

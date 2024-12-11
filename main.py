@@ -12,9 +12,18 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
-from agent.config import get_config, create_default_user_config_if_required, get_startup_log_path
+from agent.config import (
+    create_default_user_config_if_required,
+    get_config,
+    get_startup_log_path,
+)
 from agent.logger import init_logging
 from config_importer import import_config_if_required
+from returncodes import (
+    RETURN_CODE_OK,
+    RETURN_CODE_CONFIG_ERROR,
+    RETURN_CODE_ERROR,
+)
 
 if TYPE_CHECKING:
     from agent.agent import Agent
@@ -53,18 +62,18 @@ def stop_agent():
         infrastructure_agent = None
 
 
-def log(message: str, prefix: str = "[INFO]"):
+def startup_log(message: str, prefix: str = "[INFO]"):
     """Writes a message to STARTUP_LOG_FILE and stderr"""
     message = f"{prefix} {message}"
-    with open(STARTUP_LOG_FILE, 'a') as f:
+    with STARTUP_LOG_FILE.open('a') as f:
         for handler in [sys.stderr, f]:
             print(message, file=handler)
 
 
-def error(message: str):
+def config_error(message: str):
     """Writes an error to STARTUP_LOG_FILE and stderr and then exits"""
-    log(message, "[ERROR]")
-    sys.exit(1)
+    startup_log(message, "[ERROR]")
+    sys.exit(RETURN_CODE_CONFIG_ERROR)
 
 
 def main():
@@ -76,48 +85,48 @@ def main():
     except FileNotFoundError:
         pass
 
-    log("Starting Infrastructure Agent")
-    log(f"Running with encoding '{sys.getfilesystemencoding()}'")
+    startup_log("Starting Infrastructure Agent")
+    startup_log(f"Running with Python version '{sys.version.split()[0]}', encoding '{sys.getfilesystemencoding()}'")
 
     try:
         if create_default_user_config_if_required():
-            log("Created default user config file")
+            startup_log("Created default user config file")
     except Exception as ex:
-        error(f"Error creating default user config file: {ex}")
+        config_error(f"Error creating default user config file: {ex}")
 
     # read the configuration
     try:
-        log("Reading configuration file(s)")
-        config = get_config()
+        startup_log("Reading configuration file(s)")
+        config = get_config(logger=startup_log)
     except Exception as ex:
-        error(f"Configuration error: {ex}")
+        config_error(f"Configuration error: {ex}")
 
     # initialise logging
     try:
-        log("Initialising logger from config")
+        startup_log("Initialising logger from config")
         init_logging(config.logging)
         logger = logging.getLogger('main')
-        log("Logger successfully initiated")
+        startup_log("Logger successfully initiated")
     except Exception as ex:
-        error(f"Logging configuration error: {ex}")
+        config_error(f"Logging configuration error: {ex}")
 
     # attempt to read in previous config
     try:
-        log("Checking for previous config import")
+        startup_log("Checking for previous config import")
         if import_config_if_required(config):
-            config = get_config()  # Config has changed, so read it in again
+            config = get_config(logger=startup_log)  # Config has changed, so read it in again
     except Exception as ex:
-        error(f"Config import error: {ex}")
+        config_error(f"Config import error: {ex}")
 
     # start the agent
-    exitcode = 0
+    exitcode = RETURN_CODE_OK
     try:
         exitcode = start_agent(config)
     except KeyboardInterrupt:
         pass
     except Exception:
         logger.error(traceback.format_exc())
-        exitcode = 1
+        exitcode = RETURN_CODE_ERROR
 
     finally:
         stop_agent()

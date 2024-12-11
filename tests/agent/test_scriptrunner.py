@@ -6,22 +6,25 @@ Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
 import json
 import os
 import shlex
+import signal
 
 import gevent
 import pytest
 from gevent.subprocess import TimeoutExpired
 
-from agent.config import CommandConfig
+from agent.config import CommandConfig, ExecutionStyle
 from agent.scriptrunner import ScriptRunner
 
 EXIT_CODE_UNKNOWN = 3
 DYNAMIC_ENV_KEYS = ('LANG',)
 
+PATCH_PREFIX = 'agent.scriptrunner.'
+
 
 @pytest.fixture
 def scriptrunner(agent_config, platform_linux, mocker) -> ScriptRunner:
     runtimes = {name: shlex.split(line) for name, line in agent_config.windows_runtimes.items()}
-    sr = ScriptRunner(
+    yield ScriptRunner(
         platform=platform_linux,
         command_config=agent_config.commands,
         runtime_config=runtimes,
@@ -30,7 +33,6 @@ def scriptrunner(agent_config, platform_linux, mocker) -> ScriptRunner:
         process_manager=mocker.Mock(),
         platform_desc=mocker.Mock(),
     )
-    yield sr
 
 
 @pytest.mark.parametrize(
@@ -76,14 +78,14 @@ def test_scriptrunner_run_script(script, arguments, runtime, is_windows, script_
     scriptrunner.platform_desc = 'foo'
     scriptrunner.command_config['command'] = CommandConfig(
         name='check_foo', runtime=runtime, cache_manager=False, path='/bin/cmd',
-        stderr=False, long_running_key=None, use_stdin=False
+        stderr=False, long_running_key=None, execution_style=ExecutionStyle.COMMAND_LINE_ARGS
     )
 
     scriptrunner.platform = mocker.Mock(is_windows=is_windows)
     mock_proc = mocker.Mock(returncode=42)
     mock_proc.stdout.read.return_value = b''
     mock_proc.stderr.read.return_value = b''
-    mock_subp = mocker.patch('agent.scriptrunner.subprocess')
+    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
     mock_subp.Popen.return_value = mock_proc
     assert scriptrunner.run_script(script, arguments) == expected
     if script_args:
@@ -122,29 +124,36 @@ def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, s
     if isinstance(expected_stdin, dict):
         expected_stdin['env'] = _update_dynamic_env(expected_stdin['env'])
     script = f'/bin/cmd {plugin} $ARG1$' if plugin else '/bin/cmd'
+
     long_running_key = script if long_running else None
+    execution_style = ExecutionStyle.LONGRUNNING_STDIN_ARGS if long_running else ExecutionStyle.STDIN_ARGS
 
     command_name = 'command'
 
     scriptrunner.command_config[command_name] = CommandConfig(
         name=command_name, runtime=None, cache_manager=False, path=script,
-        long_running_key=long_running_key, use_stdin=True
+        long_running_key=long_running_key, execution_style=execution_style
     )
 
     expected_stdout = 'expected stdout'
     output_json = json.dumps({'exitcode': 0, 'stdout': expected_stdout, 'stderr': ''}).encode('utf-8') + b'\n'
+
     mock_process = mocker.Mock()
     mock_process.wait.side_effect = gevent.sleep
+
     if long_running:
         scriptrunner.process_manager.get_managed_process.return_value = (mock_process, mocker.Mock())
         mock_process.stdout.readline.return_value = output_json
     else:
-        mocker.patch('agent.scriptrunner.subprocess.Popen', return_value=mock_process)
+        mocker.patch(PATCH_PREFIX + 'subprocess.Popen', return_value=mock_process)
         mock_process.stdout.read.side_effect = WaitAfterFirstCall(output_json).side_effect
         mock_process.stderr.read.side_effect = WaitAfterFirstCall(None).side_effect
+
     if stdin_err:
         mock_process.stdin.close.side_effect = stdin_err
+
     exit_code, stdout, stderr, ended_early = scriptrunner.run_script(command_name, args)
+
     assert ended_early is False
     if expected_stdin:
         expected_stdin_bytes = json.dumps(expected_stdin).encode('utf-8')
@@ -160,7 +169,7 @@ def test_scriptrunner_long_running_invalid_json(scriptrunner, mocker):
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
         name=command_name, runtime=None, cache_manager=False, path='/bin/cmd arg1',
-        stderr=True, long_running_key='key', use_stdin=True
+        stderr=True, long_running_key='key', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
     )
     mock_process = mocker.Mock()
     mock_process.stdout.readline.return_value = "some rubbish that isn't json"
@@ -176,7 +185,7 @@ def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
         name=command_name, runtime=None, cache_manager=False, path=script,
-        stderr=False, long_running_key=script, use_stdin=True
+        stderr=False, long_running_key=script, execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
     )
     mock_process = mocker.Mock(pid=1)
     mock_process.stdout.readline.side_effect = gevent.Timeout
@@ -199,7 +208,7 @@ def test_scriptrunner_run_script_with_poller(poller_env, poller_fn_env, expected
 
     scriptrunner.command_config[script_name] = CommandConfig(
         name=script_name, runtime=None, cache_manager=False, path='/path',
-        stderr=False, long_running_key=None, use_stdin=False
+        stderr=False, long_running_key=None
     )
 
     poller_fn = None
@@ -208,7 +217,7 @@ def test_scriptrunner_run_script_with_poller(poller_env, poller_fn_env, expected
         scriptrunner.set_poller_env_callback(poller_fn)
     mock_proc = mocker.Mock(returncode=0)
     mock_proc.communicate.return_value = (b'', b'')
-    mock_subp = mocker.patch('agent.scriptrunner.subprocess')
+    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
     mock_subp.Popen.return_value = mock_proc
     scriptrunner.run_script(script_name, [], poller_env=poller_env)
     mock_subp.Popen.assert_called_with(
@@ -268,13 +277,22 @@ def test_scriptrunner_execute(
         expected, logexp,
         mocker, monkeypatch, scriptrunner, platform_win, caplog):
     orig_gsleep = gevent.sleep
-    mocker.patch('agent.scriptrunner.gevent.sleep')
-    mock_kill = mocker.patch('agent.scriptrunner.os.kill')
-    mock_killpg = mocker.patch('agent.scriptrunner.os.killpg')
-    mocker.patch('agent.scriptrunner.os.getpgid', return_value=-42)
+
+    mocker.patch(PATCH_PREFIX + 'gevent.sleep')
+
+    mock_kill = mocker.patch(PATCH_PREFIX + 'os.kill')
+    mock_killpg = mocker.patch(PATCH_PREFIX + 'os.killpg')
+
+    mocker.patch(PATCH_PREFIX + 'os.getpgid', return_value=-42)
+
     if windows:
         scriptrunner.platform = platform_win
-    mock_cmd = mocker.Mock(cache_manager=False, stderr=stderr, long_running_key=False, use_stdin=False)
+        # signal.CTRL_C_EVENT won't be defined when running tests on Linux so we need to mock it
+        # SIGKILL will need similar mocking if/when we support running unit tests on Windows
+        mocker.patch(PATCH_PREFIX + 'signal.CTRL_C_EVENT', 0, create=True)
+
+    command_config = CommandConfig(name='name', path='/path/to/no/where', stderr=stderr)
+
     mock_proc = mocker.Mock()
     if isinstance(comm, Exception):
         mock_proc.wait.side_effect = comm
@@ -283,30 +301,38 @@ def test_scriptrunner_execute(
         mock_proc.stdout.read.side_effect = WaitAfterFirstCall(comm[0]).side_effect
         mock_proc.stderr.read.side_effect = WaitAfterFirstCall(comm[1]).side_effect
     mock_proc.poll.return_value = poll
+    mock_proc.pid = 707
     mock_proc.returncode = 42
-    mock_subp = mocker.patch('agent.scriptrunner.subprocess')
+
+    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
     mock_subp.Popen.return_value = mock_proc
 
-    assert scriptrunner._execute('command', mock_cmd, ['/bin/cmd', 'arg1'], {}) == expected
+    assert scriptrunner._execute('command', command_config, ['/bin/cmd', 'arg1'], {}) == expected
 
-    if windows:
-        assert not mock_killpg.called
-        assert mock_kill.called == (isinstance(comm, TimeoutExpired) and not poll)
-    else:
-        assert not mock_kill.called
-        assert mock_killpg.called == (isinstance(comm, TimeoutExpired) and not poll)
+    if isinstance(comm, TimeoutExpired) and not poll:
+        if windows:
+            assert not mock_killpg.called
+            mock_kill.assert_called_once_with(707, 0)  # PID, CTRL_C_EVENT
+        else:
+            assert not mock_kill.called
+            mock_killpg.assert_called_once_with(-42, signal.SIGKILL)  # PGID, SIGKILL
 
     for text in logexp:
         assert text in caplog.text
 
 
 def test_scriptrunner_execute_file_not_found(mocker, scriptrunner):
-    mock_subp = mocker.patch('agent.scriptrunner.subprocess')
-    mock_subp.Popen.side_effect = FileNotFoundError()
     cmd_path = '/somewhere/not-found'
+
+    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
+
+    exc = FileNotFoundError()
+    exc.filename = cmd_path
+    mock_subp.Popen.side_effect = exc
+
     cmd_config = CommandConfig(
         name='check_foo', runtime=None, cache_manager=False, path='/path',
-        stderr=False, long_running_key=None, use_stdin=False
+        stderr=False, long_running_key=None
     )
 
     with pytest.raises(FileNotFoundError) as ex:
