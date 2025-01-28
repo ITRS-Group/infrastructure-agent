@@ -1,5 +1,5 @@
 :: Windows Installer MSI builder script
-:: Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
+:: Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 
 @echo off
 
@@ -11,9 +11,13 @@ python --version | findstr /E 3.9.[0-9][0-9] >nul
 if ERRORLEVEL 1 (
     echo [ERROR] Python binary found is not a version of Python 3.9.x && exit /B 1
 )
+where wix >nul 2>nulc
+if ERRORLEVEL 1 (
+    echo [ERROR] Unable to find 'wix' executable in PATH && exit /B 1
+)
 where heat >nul 2>nulc
 if ERRORLEVEL 1 (
-    echo [ERROR] 'heat' missing, ensure WiX Toolset is installed && exit /B 1
+    echo [ERROR] Unable to find 'heat' executable in PATH && exit /B 1
 )
 python -c "import cx_Freeze" >nul 2>nul
 if ERRORLEVEL 1 (
@@ -90,10 +94,26 @@ if DEFINED BUILD_UUID_PATH (
 )
 
 echo [BUILD] Building MSI with WiX
-heat dir %SDIR% -cg %WIX_GEN% -ke -out %WIX_GEN%.wxs -gg -sfrag -srd -sreg -dr INSTALLDIR -var var.SourceDir || echo [ERROR] WiX compilation failed in heat (1st call)] && exit /B 1
-candle.exe -arch x64 %WIX_GEN%.wxs -dSourceDir=%SDIR% || echo [ERROR] WiX compilation failed in candle (1st call) && exit /B 1
-candle.exe -arch x64 -dAgentVersion=%VERSION% win_wix.wxs || echo [ERROR] WiX compilation failed in candle (2nd call) && exit /B 1
-light.exe win_wix.wixobj %WIX_GEN%.wixobj -o %AGENT_MSI% || echo [ERROR] WiX compilation failed in light && exit /B 1
+:: 'Harvest' the built agent files with heat, creating %WIX_GEN%.wxs
+heat dir %SDIR% ^
+    -cg %WIX_GEN% ^
+    -ke ^
+    -out %WIX_GEN%.wxs ^
+    -gg ^
+    -sfrag ^
+    -srd ^
+    -sreg ^
+    -dr INSTALLDIR ^
+    -var var.SourceDir ^
+    || echo [ERROR] WiX compilation failed in 'heat' && exit /B 1
+
+:: Build the final MSI using harvested files and the WiX template
+wix build -o %AGENT_MSI% ^
+    -arch x64 ^
+    -define AgentVersion=%VERSION% ^
+    -define SourceDir=%SDIR% ^
+    win_wix.wxs %WIX_GEN%.wxs ^
+    || echo [ERROR] WiX compilation failed in 'wix' && exit /B 1
 
 echo [BUILD] Complete!
 call:cleanup

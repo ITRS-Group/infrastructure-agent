@@ -1,6 +1,6 @@
 """
 Implements the Infrastructure Agent Service for Windows
-Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 """
 
 import logging
@@ -44,7 +44,7 @@ class WinSvceHandler:
                     logger.error("Agent worker process ended with config error and cannot continue")
                     break
                 self._worker_process = None
-                logger.error("Agent worker process ended early. Waiting for %ss before re-starting", PROCESS_REST_SECS)
+                logger.error("Agent worker process ended early. Waiting for %ds before re-starting", PROCESS_REST_SECS)
                 time.sleep(PROCESS_REST_SECS)
         except Exception as ex:
             self._worker_process = None

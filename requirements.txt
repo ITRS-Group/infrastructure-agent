@@ -1,4 +1,4 @@
-# Copyright (C) 2003-2024 ITRS Group Ltd. All rights reserved
+# Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 # Python libraries used by (or to build) the infrastructure-agent
 
 cffi==1.15.1

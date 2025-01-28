@@ -10,6 +10,8 @@ infrastructure-agent
 infrastructure-agent.service
 infrastructure-agent.tar.gz
 infrastructure_agent.egg-info
+nulc
+plib.wxs
 VERSION
 
 # Development Files

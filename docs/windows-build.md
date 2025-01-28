@@ -7,8 +7,10 @@
 ## Prerequisites
 * [Python 3.9.x with the `venv` module installed](https://www.python.org/)
 * [.NET 3.5 via Windows Server Manager](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/enable-net-framework-35-by-using-the-add-roles-and-features-wizard)
-* [Wix Toolset 3.11.x](https://wixtoolset.org/docs/wix3/)
-  * The WiX binaries need to be added to the environment's `PATH` for the build scripts to use them.
+* [Git for Windows](https://git-scm.com/downloads/win)
+* [WiX Toolset 5.0](https://github.com/wixtoolset/wix/)
+  * The WiX applications `wix` and `heat` need to be added to the environment's `PATH` for the build scripts to use them.
+  * In a standard installation of the toolset these can be found in `C:\Program Files\WiX Toolset v5.0\bin` and `C:\Program Files\WiX Toolset v5.0\bin\x64`.
 * [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
 
 ## Build Instructions
