@@ -59,7 +59,7 @@ def test_get_managed_process(mocker):
     assert cmd_args[0] == ['path1']
     assert proc1 == proc_mock
     assert isinstance(lock1, BoundedSemaphore)
-    popen_mock.assert_called()
+    popen_mock.assert_called_with(['path1'], stdin=-1, stdout=-1, stderr=-1)
     lock1.release()
     gevent.sleep(0)
     proc2, lock2 = pm.get_managed_process('test1', 'path1')

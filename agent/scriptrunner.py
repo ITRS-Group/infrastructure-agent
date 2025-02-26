@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 class CommandError(Exception):
     """An error occurred while verifying the commands"""
+
     pass
 
 
@@ -50,6 +51,7 @@ BASE_ENV_VARS = {
 
 class ServiceReturnCodes(enum.Enum):
     """Standard service return codes"""
+
     OK = 0
     WARNING = 1
     CRITICAL = 2
@@ -59,6 +61,7 @@ class ServiceReturnCodes(enum.Enum):
 @dataclasses.dataclass
 class ScriptRunner:
     """Platform independent Script Runner class for executing commands"""
+
     cache_manager: CacheManager
     command_config: dict[str, CommandConfig]
     execution_config: ExecutionConfig
@@ -78,8 +81,9 @@ class ScriptRunner:
         """Sets the poller environment callback function"""
         self._poller_env_fn = poller_env_fn
 
-    def run_script(self, command: str, arguments: list[str],
-                   poller_env: Optional[dict[str, str]] = None) -> tuple[int, str, str, bool]:
+    def run_script(
+        self, command: str, arguments: list[str], poller_env: Optional[dict[str, str]] = None
+    ) -> tuple[int, str, str, bool]:
         """Run the script"""
         if command == EMPTY_CHECK:
             exit_code = 0
@@ -101,12 +105,12 @@ class ScriptRunner:
         args, kwargs = self._setup_args(
             command=command_config,
             script_args=shlex.split(command_config.path.format(*arguments)),
-            poller_env=poller_env
+            poller_env=poller_env,
         )
         return self._execute(command, command_config, args, kwargs)
 
     def _setup_args(
-            self, command: CommandConfig, script_args: list[str], poller_env: Optional[dict[str, str]] = None
+        self, command: CommandConfig, script_args: list[str], poller_env: Optional[dict[str, str]] = None
     ) -> tuple[list[str], dict[str, str]]:
         """Set up the arguments and environment"""
 
@@ -128,7 +132,7 @@ class ScriptRunner:
 
         subprocess_kwargs = {
             'env': self._build_env(command.cache_manager, self.cache_manager, command.name, poller_env),
-            'stdin': PIPE,
+            'stdin': PIPE if command.uses_stdin else None,
             'stdout': PIPE,
             'stderr': PIPE,
             'shell': False,
@@ -141,7 +145,7 @@ class ScriptRunner:
         return args, subprocess_kwargs
 
     def _execute(
-            self, plugin: str, command: CommandConfig, args: list[str], kwargs: dict
+        self, plugin: str, command: CommandConfig, args: list[str], kwargs: dict
     ) -> tuple[int, str, str, bool]:
         """
         Execute the command script.
@@ -210,8 +214,9 @@ class ScriptRunner:
         del proc
         return exit_code, clean_stdout, clean_stderr, early_timeout
 
-    def _read_output(self, name: str, proc: subprocess.Popen, use_stdin: bool,
-                     long_running_key: str, timeout=60) -> tuple[int, str, str]:
+    def _read_output(
+        self, name: str, proc: subprocess.Popen, use_stdin: bool, long_running_key: str, timeout=60
+    ) -> tuple[int, str, str]:
         timer = gevent.Timeout(timeout)
         stdout_buffer = bytearray()
         stderr_buffer = bytearray()
@@ -225,10 +230,11 @@ class ScriptRunner:
                     gevent.spawn(self._pipe_reader, proc.stdout, stdout_buffer),
                     gevent.spawn(self._pipe_reader, proc.stderr, stderr_buffer),
                 ]
-                try:
-                    proc.stdin.close()
-                except OSError:
-                    logger.exception("Failed to close STDIN for '%s'", name)
+                if use_stdin:
+                    try:
+                        proc.stdin.close()
+                    except OSError:
+                        logger.exception("Failed to close STDIN for '%s'", name)
                 proc.wait()
                 gevent.wait(capture_greenlets)  # Allow reader greenlets to complete
                 stdout = stdout_buffer.decode('utf-8').strip()
@@ -266,8 +272,8 @@ class ScriptRunner:
             return self.EXIT_CODE_UNKNOWN, '', f"Failed to decode json output: {raw_stdout}"
 
     def _build_env(
-            self, uses_cachemanager: bool, cache_manager: CacheManager, plugin_name: str,
-            poller_env: dict[str, str]) -> dict:
+        self, uses_cachemanager: bool, cache_manager: CacheManager, plugin_name: str, poller_env: dict[str, str]
+    ) -> dict:
         """Set up the environment variables to be used by the command"""
         platform_envs = BASE_ENV_VARS.get(self.platform.system, {})
         env = {key: os.environ.get(key, '') if value is None else value for key, value in platform_envs.items()}

@@ -36,49 +36,78 @@ def scriptrunner(agent_config, platform_linux, mocker) -> ScriptRunner:
 
 
 @pytest.mark.parametrize(
-    'uses_cm, env_vars', [
+    'uses_cm, env_vars',
+    [
         pytest.param(False, 0, id="no_cachemanager"),
         pytest.param(True, 3, id="cachemanager"),
-    ])
+    ],
+)
 def test_scriptrunner_build_env(uses_cm, env_vars, scriptrunner, cachemanager):
     env = scriptrunner._build_env(uses_cm, cachemanager, 'foo', {})
     assert len(env) == env_vars + len(DYNAMIC_ENV_KEYS)
 
 
 @pytest.mark.parametrize(
-    'script, arguments, runtime, is_windows, script_args, expected, logexp', [
+    'script, arguments, runtime, is_windows, script_args, expected, logexp',
+    [
         pytest.param('_NRPE_CHECK', [], None, False, None, (0, 'foo', '', False), [], id="success_without_args"),
         pytest.param('command', [], None, False, ['/bin/cmd'], (42, '', '', False), [], id="success"),
         pytest.param(
-            'command', [], 'valid_runtime', True,
+            'command',
+            [],
+            'valid_runtime',
+            True,
             ['valid_runtime', 'p1', '/bin/cmd'],
-            (42, '', '', False), [],
-            id="success_with_valid_runtime"),
+            (42, '', '', False),
+            [],
+            id="success_with_valid_runtime",
+        ),
         pytest.param(
-            'command', [], 'invalid_runtime', True,
+            'command',
+            [],
+            'invalid_runtime',
+            True,
             ['/bin/cmd'],
             (42, '', '', False),
             ['WARNING', "Windows runtime 'invalid_runtime' could not be found"],
-            id="warning_with_invalid_runtime"),
+            id="warning_with_invalid_runtime",
+        ),
         pytest.param('command', ['foo'], None, False, ['/bin/cmd'], (42, '', '', False), [], id="success_with_args"),
         pytest.param(
-            'unknown', [], None, False, None,
+            'unknown',
+            [],
+            None,
+            False,
+            None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
             ['WARNING ', "Command 'unknown' requested but not configured"],
-            id="unknown_with_args"),
+            id="unknown_with_args",
+        ),
         pytest.param(
-            'unknown', ['foo'], None, False, None,
+            'unknown',
+            ['foo'],
+            None,
+            False,
+            None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
             ['WARNING ', "Command 'unknown' requested but not configured"],
-            id="unknown_with_args"),
-    ])
-def test_scriptrunner_run_script(script, arguments, runtime, is_windows, script_args,
-                                 expected, logexp, scriptrunner, mocker, caplog):
+            id="unknown_with_args",
+        ),
+    ],
+)
+def test_scriptrunner_run_script(
+    script, arguments, runtime, is_windows, script_args, expected, logexp, scriptrunner, mocker, caplog
+):
 
     scriptrunner.platform_desc = 'foo'
     scriptrunner.command_config['command'] = CommandConfig(
-        name='check_foo', runtime=runtime, cache_manager=False, path='/bin/cmd',
-        stderr=False, long_running_key=None, execution_style=ExecutionStyle.COMMAND_LINE_ARGS
+        name='check_foo',
+        runtime=runtime,
+        cache_manager=False,
+        path='/bin/cmd',
+        stderr=False,
+        long_running_key=None,
+        execution_style=ExecutionStyle.COMMAND_LINE_ARGS,
     )
 
     scriptrunner.platform = mocker.Mock(is_windows=is_windows)
@@ -102,24 +131,21 @@ def test_scriptrunner_run_script(script, arguments, runtime, is_windows, script_
 
 
 @pytest.mark.parametrize(
-    'plugin, args, long_running, expected_stdin, stdin_err', [
+    'plugin, args, long_running, expected_stdin, stdin_err',
+    [
         pytest.param(
-            'lrp', ['arg1'], True, {'cmd': ['lrp', 'arg1'], 'env': {'LONG_RUNNING_PROCESS': '1'}}, None,
-            id="long_running"
+            'lrp',
+            ['arg1'],
+            True,
+            {'cmd': ['lrp', 'arg1'], 'env': {'LONG_RUNNING_PROCESS': '1'}},
+            None,
+            id="long_running",
         ),
-        pytest.param(
-            'lrp', ['arg1'], False, {'cmd': ['lrp', 'arg1'], 'env': {}}, None,
-            id="stdin_only"
-        ),
-        pytest.param(
-            'lrp', ['arg1'], False, {'cmd': ['lrp', 'arg1'], 'env': {}}, OSError(),
-            id="stdin_with_err"
-        ),
-        pytest.param(
-            '', [''], False, None, None,
-            id="stdin_no_input"
-        ),
-    ])
+        pytest.param('lrp', ['arg1'], False, {'cmd': ['lrp', 'arg1'], 'env': {}}, None, id="stdin_only"),
+        pytest.param('lrp', ['arg1'], False, {'cmd': ['lrp', 'arg1'], 'env': {}}, OSError(), id="stdin_with_err"),
+        pytest.param('', [''], False, None, None, id="stdin_no_input"),
+    ],
+)
 def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, stdin_err, scriptrunner, mocker, caplog):
     if isinstance(expected_stdin, dict):
         expected_stdin['env'] = _update_dynamic_env(expected_stdin['env'])
@@ -131,8 +157,12 @@ def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, s
     command_name = 'command'
 
     scriptrunner.command_config[command_name] = CommandConfig(
-        name=command_name, runtime=None, cache_manager=False, path=script,
-        long_running_key=long_running_key, execution_style=execution_style
+        name=command_name,
+        runtime=None,
+        cache_manager=False,
+        path=script,
+        long_running_key=long_running_key,
+        execution_style=execution_style,
     )
 
     expected_stdout = 'expected stdout'
@@ -168,8 +198,13 @@ def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, s
 def test_scriptrunner_long_running_invalid_json(scriptrunner, mocker):
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
-        name=command_name, runtime=None, cache_manager=False, path='/bin/cmd arg1',
-        stderr=True, long_running_key='key', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+        name=command_name,
+        runtime=None,
+        cache_manager=False,
+        path='/bin/cmd arg1',
+        stderr=True,
+        long_running_key='key',
+        execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
     )
     mock_process = mocker.Mock()
     mock_process.stdout.readline.return_value = "some rubbish that isn't json"
@@ -184,8 +219,13 @@ def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
     script = '/bin/cmd lrp $ARG1$'
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
-        name=command_name, runtime=None, cache_manager=False, path=script,
-        stderr=False, long_running_key=script, execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+        name=command_name,
+        runtime=None,
+        cache_manager=False,
+        path=script,
+        stderr=False,
+        long_running_key=script,
+        execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
     )
     mock_process = mocker.Mock(pid=1)
     mock_process.stdout.readline.side_effect = gevent.Timeout
@@ -198,17 +238,18 @@ def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
 
 
 @pytest.mark.parametrize(
-    'poller_env, poller_fn_env, expected_env', [
+    'poller_env, poller_fn_env, expected_env',
+    [
         pytest.param({'k1': 'v1'}, None, {'k1': 'v1'}, id="with direct poller_env"),
         pytest.param(None, {'k2': 'v2'}, {'k2': 'v2'}, id="with poller_env from callback fn"),
-    ])
+    ],
+)
 def test_scriptrunner_run_script_with_poller(poller_env, poller_fn_env, expected_env, scriptrunner, mocker):
     expected_env = _update_dynamic_env(expected_env)
     script_name = 'myscript'
 
     scriptrunner.command_config[script_name] = CommandConfig(
-        name=script_name, runtime=None, cache_manager=False, path='/path',
-        stderr=False, long_running_key=None
+        name=script_name, runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None
     )
 
     poller_fn = None
@@ -221,61 +262,69 @@ def test_scriptrunner_run_script_with_poller(poller_env, poller_fn_env, expected
     mock_subp.Popen.return_value = mock_proc
     scriptrunner.run_script(script_name, [], poller_env=poller_env)
     mock_subp.Popen.assert_called_with(
-        mocker.ANY, env=expected_env,
-        stdin=mocker.ANY, stdout=mocker.ANY, stderr=mocker.ANY, shell=mocker.ANY, preexec_fn=mocker.ANY,
+        mocker.ANY,
+        env=expected_env,
+        stdin=mocker.ANY,
+        stdout=mocker.ANY,
+        stderr=mocker.ANY,
+        shell=mocker.ANY,
+        preexec_fn=mocker.ANY,
     )
     if poller_fn:
         poller_fn.assert_called_with(script_name)
 
 
 @pytest.mark.parametrize(
-    'windows, stderr, comm, poll, expected, logexp', [
+    'windows, stderr, comm, poll, expected, logexp',
+    [
+        pytest.param(False, False, (b'', b''), None, (42, '', '', False), [], id="linux_success"),
+        pytest.param(False, False, (b'foo', b'bar'), None, (42, 'foo', '', False), [], id="linux_success_with_data"),
+        pytest.param(False, False, (b'', b'bar'), None, (42, '', '', False), [], id="linux_success_just_stderr"),
+        pytest.param(False, True, (b'', b''), None, (42, '', '', False), [], id="linux_stderr"),
+        pytest.param(False, True, (b'foo', b'bar'), None, (42, 'foo', 'bar', False), [], id="linux_stderr_with_data"),
+        pytest.param(False, True, (b'', b'bar'), None, (42, '', 'bar', False), [], id="linux_stderr_just_stderr"),
+        pytest.param(True, False, (b'', b''), None, (42, '', '', False), [], id="win_success"),
         pytest.param(
-            False, False, (b'', b''), None, (42, '', '', False), [],
-            id="linux_success"),
-        pytest.param(
-            False, False, (b'foo', b'bar'), None, (42, 'foo', '', False), [],
-            id="linux_success_with_data"),
-        pytest.param(
-            False, False, (b'', b'bar'), None, (42, '', '', False), [],
-            id="linux_success_just_stderr"),
-        pytest.param(
-            False, True, (b'', b''), None, (42, '', '', False), [],
-            id="linux_stderr"),
-        pytest.param(
-            False, True, (b'foo', b'bar'), None, (42, 'foo', 'bar', False), [],
-            id="linux_stderr_with_data"),
-        pytest.param(
-            False, True, (b'', b'bar'), None, (42, '', 'bar', False), [],
-            id="linux_stderr_just_stderr"),
-        pytest.param(
-            True, False, (b'', b''), None, (42, '', '', False), [],
-            id="win_success"),
-        pytest.param(
-            False, False, TimeoutExpired('foo', 1), True,
+            False,
+            False,
+            TimeoutExpired('foo', 1),
+            True,
             (2, '', "ERROR: Command 'command' did not exit within 60 seconds.", True),
             ['ERROR ', "Process '/bin/cmd' did not exit within 60 seconds"],
-            id="timeout"),
+            id="timeout",
+        ),
         pytest.param(
-            True, False, TimeoutExpired('foo', 1), True,
+            True,
+            False,
+            TimeoutExpired('foo', 1),
+            True,
             (2, '', "ERROR: Command 'command' did not exit within 60 seconds.", True),
             ['ERROR ', "Process '/bin/cmd' did not exit within 60 seconds"],
-            id="timeout_windows"),
+            id="timeout_windows",
+        ),
         pytest.param(
-            False, False, TimeoutExpired('foo', 1), None,
+            False,
+            False,
+            TimeoutExpired('foo', 1),
+            None,
             (2, '', "ERROR: Command 'command' did not exit within 60 seconds (and was killed).", True),
             ['ERROR ', "Process '/bin/cmd' did not exit within 60 seconds (and was killed)"],
-            id="killed"),
+            id="killed",
+        ),
         pytest.param(
-            True, False, TimeoutExpired('foo', 1), None,
+            True,
+            False,
+            TimeoutExpired('foo', 1),
+            None,
             (2, '', "ERROR: Command 'command' did not exit within 60 seconds (and was killed).", True),
             ['ERROR ', "Process '/bin/cmd' did not exit within 60 seconds (and was killed)"],
-            id="killed_windows"),
-    ])
+            id="killed_windows",
+        ),
+    ],
+)
 def test_scriptrunner_execute(
-        windows, stderr, comm, poll,
-        expected, logexp,
-        mocker, monkeypatch, scriptrunner, platform_win, caplog):
+    windows, stderr, comm, poll, expected, logexp, mocker, monkeypatch, scriptrunner, platform_win, caplog
+):
     orig_gsleep = gevent.sleep
 
     mocker.patch(PATCH_PREFIX + 'gevent.sleep')
@@ -331,14 +380,39 @@ def test_scriptrunner_execute_file_not_found(mocker, scriptrunner):
     mock_subp.Popen.side_effect = exc
 
     cmd_config = CommandConfig(
-        name='check_foo', runtime=None, cache_manager=False, path='/path',
-        stderr=False, long_running_key=None
+        name='check_foo', runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None
     )
 
     with pytest.raises(FileNotFoundError) as ex:
         scriptrunner._execute('command', cmd_config, [cmd_path, 'arg'], {})
     expected = f"Cannot find command: '{cmd_path}'"
     assert expected in str(ex)
+
+
+@pytest.mark.parametrize(
+    'execution_style, expected_stdin',
+    [
+        pytest.param(ExecutionStyle.COMMAND_LINE_ARGS, None, id="std-args"),
+        pytest.param(ExecutionStyle.STDIN_ARGS, -1, id="stdin-args"),
+    ],
+)
+def test_scriptrunner_stdin_pipe(mocker, scriptrunner, execution_style, expected_stdin):
+    """
+    Specific test for stdin pipe handling.
+    Long-running processes are tested within 'test_processmanager.py'
+    """
+    command = 'command1'
+    scriptrunner.command_config[command] = CommandConfig(
+        command,
+        '/bin/cmd',
+        execution_style=execution_style,
+    )
+    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
+    mock_subp.Popen.return_value = mocker.Mock()
+    scriptrunner.run_script(command, ['arg1'])
+    mock_subp.Popen.assert_called_with(
+        mocker.ANY, env=mocker.ANY, stdin=expected_stdin, stdout=-1, stderr=-1, shell=False, preexec_fn=mocker.ANY
+    )
 
 
 class WaitAfterFirstCall:
