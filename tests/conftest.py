@@ -4,17 +4,22 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 """
 
 import logging
+from copy import deepcopy
+
 import pytest
 import yaml
 
 from pathlib import Path
 
-from agent.config import AgentConfig
+from agent.config import AgentConfig, EnvironmentVariableConfig
 from agent.objects import Platform
 
 BASE_PATH = Path(__file__).parent
 TEST_CONFIG_RELATIVE_PATH = "resources/config.yml"
-TEST_CONFIG__PATH = (BASE_PATH / TEST_CONFIG_RELATIVE_PATH).resolve()
+TEST_CONFIG_PATH = (BASE_PATH / TEST_CONFIG_RELATIVE_PATH).resolve()
+
+RAW_AGENT_CONFIG = yaml.safe_load(TEST_CONFIG_PATH.read_text())
+GLOBAL_ENVVAR_CFG = EnvironmentVariableConfig.from_dict(RAW_AGENT_CONFIG['environment_variables'])
 
 
 @pytest.fixture(autouse=True)
@@ -24,9 +29,7 @@ def logging_debug(caplog):
 
 @pytest.fixture()
 def agent_config() -> AgentConfig:
-    with open(TEST_CONFIG__PATH, 'r') as f:
-        config_dict = yaml.safe_load(f)
-    return AgentConfig.from_dict(config_dict)
+    yield AgentConfig.from_dict(deepcopy(RAW_AGENT_CONFIG))
 
 
 @pytest.fixture

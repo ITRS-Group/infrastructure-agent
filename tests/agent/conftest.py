@@ -3,9 +3,21 @@ Infrastructure Agent: Fixtures for agent unit tests
 Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
 from agent.cachemanager import CacheManager
+
+if TYPE_CHECKING:
+    from agent.config import EnvironmentVariableConfig
+
+
+@pytest.fixture()
+def global_environment_variables(agent_config) -> EnvironmentVariableConfig:
+    return agent_config.environment_variables
 
 
 @pytest.fixture

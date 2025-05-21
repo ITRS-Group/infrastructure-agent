@@ -13,6 +13,7 @@ import traceback
 from typing import TYPE_CHECKING
 
 from agent.config import (
+    ConfigurationError,
     create_default_user_config_if_required,
     get_config,
     get_startup_log_path,
@@ -98,8 +99,10 @@ def main():
     try:
         startup_log("Reading configuration file(s)")
         config = get_config(logger=startup_log)
-    except Exception as ex:
+    except ConfigurationError as ex:
         config_error(f"Configuration error: {ex}")
+    except Exception as ex:
+        config_error(f"Configuration error: {ex}\n{traceback.format_exc()}")
 
     # initialise logging
     try:
@@ -124,12 +127,15 @@ def main():
         exitcode = start_agent(config)
     except KeyboardInterrupt:
         pass
+    except ConfigurationError as ex:
+        config_error(f"Configuration error: {ex}")
     except Exception:
         logger.error(traceback.format_exc())
         exitcode = RETURN_CODE_ERROR
 
     finally:
         stop_agent()
+        startup_log("Stopping Infrastructure Agent")
         sys.exit(exitcode)
 
 

@@ -2,8 +2,10 @@
 Infrastructure Agent: Unit tests for config classes and functions.
 Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 """
+
 import contextlib
 import os
+from inspect import isclass
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from agent.config import (
     AgentConfig,
     CommandConfig,
     ConfigurationError,
+    EnvironmentVariableConfig,
     ExecutionConfig,
     ExecutionStyle,
     create_default_user_config_if_required,
@@ -22,6 +25,7 @@ from agent.config import (
     get_startup_log_path,
     parse_byte_string,
 )
+from tests.conftest import GLOBAL_ENVVAR_CFG
 
 MUL_KB = 1024
 MUL_MB = MUL_KB * 1024
@@ -143,17 +147,31 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
 @pytest.mark.parametrize('config_dict, expected, exception', [
     pytest.param(
         {'foo': {'path': 'P'}},
-        {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=False, NAME='commands')},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=GLOBAL_ENVVAR_CFG)
+        },
         None,
         id="success"),
     pytest.param(
         {'foo': {'path': 'P', 'runtime': 'R'}},
-        {'foo': CommandConfig(name='foo', path='P', runtime='R', cache_manager=False, NAME='commands')},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime='R', cache_manager=False,
+                environment_variables=GLOBAL_ENVVAR_CFG
+            )
+        },
         None,
         id="success_with_runtime"),
     pytest.param(
         {'foo': {'path': 'P', 'cache_manager': True}},
-        {'foo': CommandConfig(name='foo', path='P', runtime=None, cache_manager=True, NAME='commands')},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=True,
+                environment_variables=GLOBAL_ENVVAR_CFG
+            )
+        },
         None,
         id="success_using_cache_manager"),
     pytest.param(
@@ -171,7 +189,9 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {
             'foo': CommandConfig(
                 name='foo', path='P', runtime=None,
-                long_running_key='P', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS)
+                long_running_key='P', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
+            )
         },
         None,
         id="long_running_key_path"),
@@ -185,7 +205,8 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {
             'foo': CommandConfig(
                 name='foo', path='P', runtime=None,
-                long_running_key='foo', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+                long_running_key='foo', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -212,8 +233,9 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {'foo': {'path': 'P', 'use_stdin': False}},
         {
             'foo': CommandConfig(
-                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
-                execution_style=ExecutionStyle.COMMAND_LINE_ARGS
+                name='foo', path='P', runtime=None, cache_manager=False,
+                execution_style=ExecutionStyle.COMMAND_LINE_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -222,8 +244,9 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {'foo': {'path': 'P', 'use_stdin': True}},
         {
             'foo': CommandConfig(
-                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
-                execution_style=ExecutionStyle.STDIN_ARGS
+                name='foo', path='P', runtime=None, cache_manager=False,
+                execution_style=ExecutionStyle.STDIN_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -241,8 +264,9 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {'foo': {'use_stdin': False, 'path': 'P', 'execution_style': ExecutionStyle.COMMAND_LINE_ARGS.value}},
         {
             'foo': CommandConfig(
-                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
-                execution_style=ExecutionStyle.COMMAND_LINE_ARGS
+                name='foo', path='P', runtime=None, cache_manager=False,
+                execution_style=ExecutionStyle.COMMAND_LINE_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -253,8 +277,9 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {'foo': {'use_stdin': True, 'path': 'P', 'execution_style': ExecutionStyle.STDIN_ARGS.value}},
         {
             'foo': CommandConfig(
-                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
-                execution_style=ExecutionStyle.STDIN_ARGS
+                name='foo', path='P', runtime=None, cache_manager=False,
+                execution_style=ExecutionStyle.STDIN_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -272,13 +297,14 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         {
             'foo': {
                 'use_stdin': True, 'path': 'P',
-                'long_running_key': '$PATH', 'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value
+                'long_running_key': '$PATH', 'execution_style': ExecutionStyle.LONGRUNNING_STDIN_ARGS.value,
             }
         },
         {
             'foo': CommandConfig(
-                name='foo', path='P', runtime=None, cache_manager=False, NAME='commands',
-                long_running_key='$PATH', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS
+                name='foo', path='P', runtime=None, cache_manager=False,
+                long_running_key='$PATH', execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
+                environment_variables=GLOBAL_ENVVAR_CFG
             )
         },
         None,
@@ -290,10 +316,84 @@ def test_executionconfig_from_dict(config_dict, expected, exception):
         "(LONGRUNNING_STDIN_ARGS). Please only set 'execution_style'.",
         ConfigurationError,
         id="old_use_stdin_false_lr_stdin_style"),
+
+    # Tests for custom environment variables
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': None}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig())
+        },
+        None,
+        id="no-envvars"
+    ),
+
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': {'passthrough': None}}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig(
+                    passthrough=[], custom={'C_VAR1': 'strval-override', 'C_VAR2': '222'})
+            )
+        },
+        None,
+        id="no-passthrough-vars"
+    ),
+
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': {'custom': None}}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig(
+                    passthrough=['PT_VAR1', 'PT_VAR2'], custom={})
+            )
+        },
+        None,
+        id="no-custom-vars"
+    ),
+
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': {'passthrough': ['A', 'B']}}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig(
+                    passthrough=['A', 'B'], custom={'C_VAR1': 'strval-override', 'C_VAR2': '222'})
+            )
+        },
+        None,
+        id="override-passthrough"
+    ),
+
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': {'custom': {'C': 'D'}}}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig(passthrough=['PT_VAR1', 'PT_VAR2'], custom={'C': 'D'}))
+        },
+        None,
+        id="override-custom"
+    ),
+
+    pytest.param(
+        {'foo': {'path': 'P', 'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}}},
+        {
+            'foo': CommandConfig(
+                name='foo', path='P', runtime=None, cache_manager=False,
+                environment_variables=EnvironmentVariableConfig(passthrough=['A', 'B'], custom={'C': 'D'}))
+        },
+        None,
+        id="override-passthrough-and-custom"
+    ),
+
 ])
-def test_commandconfig_from_dict(config_dict, expected, exception):
+def test_commandconfig_from_dict(config_dict, expected, exception, agent_config):
     with pytest.raises(exception) if exception else contextlib.nullcontext() as e:
-        assert CommandConfig.from_dict(config_dict) == expected
+        assert CommandConfig.from_dict(config_dict, agent_config.environment_variables) == expected
     if exception:
         assert expected in str(e)
 
@@ -332,8 +432,11 @@ def test_commandconfig_arg_parsing(path, expected_parsed_path, expected_max_uniq
 @pytest.mark.parametrize(
     'config_dict, expected, exception', [
         pytest.param(
-            {}, "Missing configuration section: 'cachemanager'", ConfigurationError,
-            id="Missing cachemanager"),
+            {}, "Missing configuration section: 'environment_variables'", ConfigurationError,
+            id="missing-environment_variables"),
+        pytest.param(
+            {'environment_variables': {}}, "Missing configuration section: 'cachemanager'", ConfigurationError,
+            id="missing-cachemanager"),
     ])
 def test_agentconfig_from_dict(config_dict, expected, exception):
     with pytest.raises(exception) as exp:
@@ -387,3 +490,28 @@ def test_create_default_user_config(mocker, existing_content: str, expected_cont
     assert cfg_path.is_file()
     with cfg_path.open('r') as f:
         assert f.read() == expected_content
+
+
+@pytest.mark.parametrize('passthrough, custom, expected', [
+    pytest.param([], {}, EnvironmentVariableConfig([], {}), id='empty-cfg'),
+    pytest.param(['a', 'b'], {}, EnvironmentVariableConfig(['a', 'b'], {}), id='just-pt'),
+    pytest.param([], {'c': 'd'}, EnvironmentVariableConfig([], {'c': 'd'}), id='just-custom'),
+    pytest.param(["707"], {}, ConfigurationError, id='integer-pt'),
+    pytest.param(["7.07"], {}, ConfigurationError, id='decimal-pt'),
+    pytest.param([707], {}, ConfigurationError, id='raw-integer-pt'),
+    pytest.param([7.07], {}, ConfigurationError, id='raw-decimal-pt'),
+
+    pytest.param([], {"7": 'd'}, ConfigurationError, id='integer-custom-key'),
+    pytest.param([], {"7.07": 'd'}, ConfigurationError, id='decimal-custom-key'),
+    pytest.param([], {7: 'd'}, ConfigurationError, id='raw-integer-custom-key'),
+    pytest.param([], {7.07: 'd'}, ConfigurationError, id='raw-decimal-custom-key'),
+])
+def test_environment_variable_config_validation(passthrough, custom, expected):
+    if isclass(expected) and issubclass(expected, Exception):
+        exception_context = pytest.raises(expected)
+    else:
+        exception_context = contextlib.nullcontext()
+
+    with exception_context:
+        cfg = EnvironmentVariableConfig(passthrough=passthrough, custom=custom)
+        assert cfg == expected

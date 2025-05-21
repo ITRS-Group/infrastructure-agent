@@ -4,7 +4,6 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 """
 
 import json
-import os
 import shlex
 import signal
 
@@ -12,8 +11,10 @@ import gevent
 import pytest
 from gevent.subprocess import TimeoutExpired
 
-from agent.config import CommandConfig, ExecutionStyle
+from agent.config import CommandConfig, ExecutionStyle, EnvironmentVariableConfig
+from agent.poller import ENV_AGENT_POLLER_DATA
 from agent.scriptrunner import ScriptRunner
+from tests.conftest import GLOBAL_ENVVAR_CFG
 
 EXIT_CODE_UNKNOWN = 3
 DYNAMIC_ENV_KEYS = ('LANG',)
@@ -35,16 +36,59 @@ def scriptrunner(agent_config, platform_linux, mocker) -> ScriptRunner:
     )
 
 
-@pytest.mark.parametrize(
-    'uses_cm, env_vars',
-    [
-        pytest.param(False, 0, id="no_cachemanager"),
-        pytest.param(True, 3, id="cachemanager"),
-    ],
-)
-def test_scriptrunner_build_env(uses_cm, env_vars, scriptrunner, cachemanager):
-    env = scriptrunner._build_env(uses_cm, cachemanager, 'foo', {})
-    assert len(env) == env_vars + len(DYNAMIC_ENV_KEYS)
+MOCK_ENV = {
+    'PT_VAR1': 'strval-original',
+    'MYTEAMIS': 'opsview',
+    'C_VAR1': 'cvar1-original'
+}
+
+EXPECTED_CM_VARS = {
+    'OPSVIEW_CACHE_MANAGER_HOST': '127.0.0.1',
+    'OPSVIEW_CACHE_MANAGER_NAMESPACE': 'ENC: namespace=PLUGIN#check_foo&timestamp=1533110400',
+    'OPSVIEW_CACHE_MANAGER_PORT': '8183'
+}
+
+
+@pytest.mark.parametrize('env_vars, uses_cm, poller_env, expected', [
+    pytest.param(
+        EnvironmentVariableConfig(), False, {},
+        {},
+        id="empty-envvars-no-cm-no-poller"
+    ),
+    pytest.param(
+        GLOBAL_ENVVAR_CFG, False, {},
+        {'C_VAR1': 'strval-override', 'C_VAR2': '222', 'PT_VAR1': 'strval-original'},
+        id="custom-envvars-no-cm-no-poller"
+    ),
+
+    pytest.param(
+        GLOBAL_ENVVAR_CFG, True, {},
+        {'C_VAR1': 'strval-override', 'C_VAR2': '222', 'PT_VAR1': 'strval-original'} | EXPECTED_CM_VARS,
+        id="custom-envvars-yes-cm-no-poller"
+    ),
+
+    pytest.param(
+        GLOBAL_ENVVAR_CFG, True, {ENV_AGENT_POLLER_DATA: 'data'},
+        {
+            'C_VAR1': 'strval-override', 'C_VAR2': '222', 'PT_VAR1': 'strval-original', ENV_AGENT_POLLER_DATA: 'data'
+        } | EXPECTED_CM_VARS,
+        id="custom-envvars-yes-cm-yes-poller"
+    ),
+
+])
+def test_scriptrunner_build_env(
+        mocker, scriptrunner, agent_config, cachemanager, env_vars, uses_cm, poller_env, expected
+):
+    mocker.patch(PATCH_PREFIX + 'os.environ', MOCK_ENV)
+    mocker.patch('time.time', return_value=1533110400)
+    env = scriptrunner._build_env(
+        environment_variables=env_vars,
+        uses_cachemanager=uses_cm,
+        cache_manager=cachemanager,
+        plugin_name='check_foo',
+        poller_env=poller_env,
+    )
+    assert env == expected
 
 
 @pytest.mark.parametrize(
@@ -72,7 +116,15 @@ def test_scriptrunner_build_env(uses_cm, env_vars, scriptrunner, cachemanager):
             ['WARNING', "Windows runtime 'invalid_runtime' could not be found"],
             id="warning_with_invalid_runtime",
         ),
-        pytest.param('command', ['foo'], None, False, ['/bin/cmd'], (42, '', '', False), [], id="success_with_args"),
+        pytest.param(
+            'command',
+            ['foo'],
+            None,
+            False,
+            ['/bin/cmd', 'bar', 'foo'],
+            (42, '', '', False),
+            [],
+            id="success_with_args"),
         pytest.param(
             'unknown',
             [],
@@ -81,7 +133,7 @@ def test_scriptrunner_build_env(uses_cm, env_vars, scriptrunner, cachemanager):
             None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
             ['WARNING ', "Command 'unknown' requested but not configured"],
-            id="unknown_with_args",
+            id="unknown_without_args",
         ),
         pytest.param(
             'unknown',
@@ -93,10 +145,20 @@ def test_scriptrunner_build_env(uses_cm, env_vars, scriptrunner, cachemanager):
             ['WARNING ', "Command 'unknown' requested but not configured"],
             id="unknown_with_args",
         ),
+        pytest.param(
+            'command',
+            ['"path=C:\\Program Files\\Opsview Agent\\" filter+size=gt:1 MaxWarn=0 MaxCrit=1'],
+            None,
+            True,
+            None,
+            (3, "COMMAND FAILURE: Failed to parse command arguments.", '', False),
+            ['WARNING', "Command 'command' Unable to parse arguments"],
+            id="unparsable_args",
+        ),
     ],
 )
 def test_scriptrunner_run_script(
-    script, arguments, runtime, is_windows, script_args, expected, logexp, scriptrunner, mocker, caplog
+    agent_config, script, arguments, runtime, is_windows, script_args, expected, logexp, scriptrunner, mocker, caplog
 ):
 
     scriptrunner.platform_desc = 'foo'
@@ -104,10 +166,11 @@ def test_scriptrunner_run_script(
         name='check_foo',
         runtime=runtime,
         cache_manager=False,
-        path='/bin/cmd',
+        path='/bin/cmd bar $ARG1$' if arguments else '/bin/cmd',
         stderr=False,
         long_running_key=None,
         execution_style=ExecutionStyle.COMMAND_LINE_ARGS,
+        environment_variables=agent_config.environment_variables
     )
 
     scriptrunner.platform = mocker.Mock(is_windows=is_windows)
@@ -146,9 +209,12 @@ def test_scriptrunner_run_script(
         pytest.param('', [''], False, None, None, id="stdin_no_input"),
     ],
 )
-def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, stdin_err, scriptrunner, mocker, caplog):
+def test_scriptrunner_long_running(
+        agent_config, plugin, args, long_running, expected_stdin, stdin_err, scriptrunner, mocker, caplog
+):
     if isinstance(expected_stdin, dict):
         expected_stdin['env'] = _update_dynamic_env(expected_stdin['env'])
+
     script = f'/bin/cmd {plugin} $ARG1$' if plugin else '/bin/cmd'
 
     long_running_key = script if long_running else None
@@ -163,6 +229,7 @@ def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, s
         path=script,
         long_running_key=long_running_key,
         execution_style=execution_style,
+        environment_variables=agent_config.environment_variables
     )
 
     expected_stdout = 'expected stdout'
@@ -195,7 +262,7 @@ def test_scriptrunner_long_running(plugin, args, long_running, expected_stdin, s
     assert stdout == expected_stdout
 
 
-def test_scriptrunner_long_running_invalid_json(scriptrunner, mocker):
+def test_scriptrunner_long_running_invalid_json(agent_config, scriptrunner, mocker):
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
         name=command_name,
@@ -205,6 +272,7 @@ def test_scriptrunner_long_running_invalid_json(scriptrunner, mocker):
         stderr=True,
         long_running_key='key',
         execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
+        environment_variables=agent_config.environment_variables
     )
     mock_process = mocker.Mock()
     mock_process.stdout.readline.return_value = "some rubbish that isn't json"
@@ -215,7 +283,7 @@ def test_scriptrunner_long_running_invalid_json(scriptrunner, mocker):
     assert 'Failed to decode json output' in stderr
 
 
-def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
+def test_scriptrunner_long_running_with_timeout(agent_config, scriptrunner, mocker):
     script = '/bin/cmd lrp $ARG1$'
     command_name = 'command'
     scriptrunner.command_config[command_name] = CommandConfig(
@@ -226,6 +294,7 @@ def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
         stderr=False,
         long_running_key=script,
         execution_style=ExecutionStyle.LONGRUNNING_STDIN_ARGS,
+        environment_variables=agent_config.environment_variables
     )
     mock_process = mocker.Mock(pid=1)
     mock_process.stdout.readline.side_effect = gevent.Timeout
@@ -244,12 +313,15 @@ def test_scriptrunner_long_running_with_timeout(scriptrunner, mocker):
         pytest.param(None, {'k2': 'v2'}, {'k2': 'v2'}, id="with poller_env from callback fn"),
     ],
 )
-def test_scriptrunner_run_script_with_poller(poller_env, poller_fn_env, expected_env, scriptrunner, mocker):
+def test_scriptrunner_run_script_with_poller(
+        agent_config, poller_env, poller_fn_env, expected_env, scriptrunner, mocker
+):
     expected_env = _update_dynamic_env(expected_env)
     script_name = 'myscript'
 
     scriptrunner.command_config[script_name] = CommandConfig(
-        name=script_name, runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None
+        name=script_name, runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None,
+        environment_variables=agent_config.environment_variables
     )
 
     poller_fn = None
@@ -370,7 +442,7 @@ def test_scriptrunner_execute(
         assert text in caplog.text
 
 
-def test_scriptrunner_execute_file_not_found(mocker, scriptrunner):
+def test_scriptrunner_execute_file_not_found(mocker, scriptrunner, caplog):
     cmd_path = '/somewhere/not-found'
 
     mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
@@ -383,10 +455,9 @@ def test_scriptrunner_execute_file_not_found(mocker, scriptrunner):
         name='check_foo', runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None
     )
 
-    with pytest.raises(FileNotFoundError) as ex:
-        scriptrunner._execute('command', cmd_config, [cmd_path, 'arg'], {})
-    expected = f"Cannot find command: '{cmd_path}'"
-    assert expected in str(ex)
+    expected = (EXIT_CODE_UNKNOWN, f"COMMAND FAILURE: Command not found: '{cmd_path}'.", '', False)
+    assert scriptrunner._execute('command', cmd_config, [cmd_path, 'arg'], {}) == expected
+    assert f"Unable to find command '{cmd_path}'" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -396,7 +467,7 @@ def test_scriptrunner_execute_file_not_found(mocker, scriptrunner):
         pytest.param(ExecutionStyle.STDIN_ARGS, -1, id="stdin-args"),
     ],
 )
-def test_scriptrunner_stdin_pipe(mocker, scriptrunner, execution_style, expected_stdin):
+def test_scriptrunner_stdin_pipe(agent_config, mocker, scriptrunner, execution_style, expected_stdin):
     """
     Specific test for stdin pipe handling.
     Long-running processes are tested within 'test_processmanager.py'
@@ -406,6 +477,7 @@ def test_scriptrunner_stdin_pipe(mocker, scriptrunner, execution_style, expected
         command,
         '/bin/cmd',
         execution_style=execution_style,
+        environment_variables=agent_config.environment_variables
     )
     mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
     mock_subp.Popen.return_value = mocker.Mock()
@@ -429,8 +501,11 @@ class WaitAfterFirstCall:
         return self._data
 
 
+CUSTOM_ENV_VARS = {'C_VAR1': 'strval-override', 'C_VAR2': '222'}
+
+
 def _update_dynamic_env(env_dict: dict[str, str]):
     """Updates an environment dict with actual environment values (adding these first)"""
-    updated_env_dict = {key: os.environ.get(key, '') for key in DYNAMIC_ENV_KEYS}
+    updated_env_dict = CUSTOM_ENV_VARS.copy()
     updated_env_dict.update(env_dict)
     return updated_env_dict

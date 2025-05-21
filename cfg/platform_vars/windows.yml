@@ -2,6 +2,44 @@
 # Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 ---
 windows_runtimes: {}
+environment_variables:
+  passthrough:
+    - ALLUSERSPROFILE
+    - APPDATA
+    - CommonProgramFiles
+    - CommonProgramFiles(x86)
+    - CommonProgramW6432
+    - COMPUTERNAME
+    - ComSpec
+    - DriverData
+    - HOMEDRIVE
+    - HOMEPATH
+    - LOCALAPPDATA
+    - LOGONSERVER
+    - NUMBER_OF_PROCESSORS
+    - OS
+    - PATH
+    - PATHEXT
+    - PROCESSOR_ARCHITECTURE
+    - PROCESSOR_IDENTIFIER
+    - PROCESSOR_LEVEL
+    - PROCESSOR_REVISION
+    - ProgramData
+    - ProgramFiles
+    - ProgramW6432
+    - PSModulePath
+    - PUBLIC
+    - SystemDrive
+    - SystemRoot
+    - TEMP
+    - TMP
+    - USERDOMAIN
+    - USERDOMAIN_ROAMINGPROFILE
+    - USERNAME
+    - USERPROFILE
+    - windir
+  custom:
+    PYTHONUTF8: 1
 logging:
   handlers:
     file:

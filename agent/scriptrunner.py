@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from gevent.greenlet import Greenlet
 
     from .cachemanager import CacheManager
-    from .config import CommandConfig, ExecutionConfig
+    from .config import CommandConfig, EnvironmentVariableConfig, ExecutionConfig
     from .objects import Platform
 
 EMPTY_CHECK = "_NRPE_CHECK"
@@ -38,20 +38,11 @@ logger = logging.getLogger(__name__)
 
 class CommandError(Exception):
     """An error occurred while verifying the commands"""
-
     pass
-
-
-# Environment variables required on each platform ('None' means read from OS)
-BASE_ENV_VARS = {
-    'Linux': {'LANG': None},
-    'Windows': {'LANG': None, 'PATH': None, 'PYTHONUTF8': '1', 'SYSTEMROOT': None, 'COMPUTERNAME': None},
-}
 
 
 class ServiceReturnCodes(enum.Enum):
     """Standard service return codes"""
-
     OK = 0
     WARNING = 1
     CRITICAL = 2
@@ -102,11 +93,17 @@ class ScriptRunner:
             # If request has less args than the command is configured for then pad out the args list with empty strings
             arguments = arguments + [''] * (command_config.max_unique_arg_index - len(arguments))
 
-        args, kwargs = self._setup_args(
-            command=command_config,
-            script_args=shlex.split(command_config.path.format(*arguments)),
-            poller_env=poller_env,
-        )
+        try:
+            args, kwargs = self._setup_args(
+                command=command_config,
+                script_args=shlex.split(command_config.path.format(*arguments)),
+                poller_env=poller_env,
+            )
+        except Exception:
+            # Do not log the arguments since they may contain sensitive data.
+            logger.warning("Command '%s' Unable to parse arguments", command)
+            return ServiceReturnCodes.UNKNOWN.value, "COMMAND FAILURE: Failed to parse command arguments.", "", False
+
         return self._execute(command, command_config, args, kwargs)
 
     def _setup_args(
@@ -131,7 +128,10 @@ class ScriptRunner:
             poller_env = self._poller_env_fn(command.name)
 
         subprocess_kwargs = {
-            'env': self._build_env(command.cache_manager, self.cache_manager, command.name, poller_env),
+            'env': self._build_env(
+                command.environment_variables, command.cache_manager,
+                self.cache_manager, command.name, poller_env
+            ),
             'stdin': PIPE if command.uses_stdin else None,
             'stdout': PIPE,
             'stderr': PIPE,
@@ -172,7 +172,10 @@ class ScriptRunner:
                 # execution_style is ExecutionStyle.COMMAND_LINE_ARGS:
                 proc = subprocess.Popen(args, **kwargs)
         except FileNotFoundError:
-            raise FileNotFoundError(f"Cannot find command: '{command_path}'")
+            logger.warning("Unable to find command '%s'", command_path)
+            return (
+                ServiceReturnCodes.UNKNOWN.value,
+                f"COMMAND FAILURE: Command not found: '{command_path}'.", "", False)
 
         pid = proc.pid
         max_wait_secs = self.execution_config.execution_timeout
@@ -215,7 +218,7 @@ class ScriptRunner:
         return exit_code, clean_stdout, clean_stderr, early_timeout
 
     def _read_output(
-        self, name: str, proc: subprocess.Popen, use_stdin: bool, long_running_key: str, timeout=60
+        self, name: str, proc: subprocess.Popen, use_stdin: bool, long_running_key: str, timeout: int = 60
     ) -> tuple[int, str, str]:
         timer = gevent.Timeout(timeout)
         stdout_buffer = bytearray()
@@ -272,11 +275,14 @@ class ScriptRunner:
             return self.EXIT_CODE_UNKNOWN, '', f"Failed to decode json output: {raw_stdout}"
 
     def _build_env(
-        self, uses_cachemanager: bool, cache_manager: CacheManager, plugin_name: str, poller_env: dict[str, str]
-    ) -> dict:
+        self, environment_variables: EnvironmentVariableConfig, uses_cachemanager: bool,
+        cache_manager: CacheManager, plugin_name: str, poller_env: dict[str, str]
+    ) -> dict[str, str]:
         """Set up the environment variables to be used by the command"""
-        platform_envs = BASE_ENV_VARS.get(self.platform.system, {})
-        env = {key: os.environ.get(key, '') if value is None else value for key, value in platform_envs.items()}
+        env = {
+            var_name: os.environ[var_name] for var_name in environment_variables.passthrough if var_name in os.environ
+        } | environment_variables.custom
+
         if poller_env:
             env |= poller_env
 

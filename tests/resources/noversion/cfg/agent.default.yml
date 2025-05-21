@@ -10,6 +10,13 @@ cachemanager:
   port: 8183
   timestamp_error_margin: 300
 commands: {}
+environment_variables:
+  passthrough:
+    - PASSTHROUGH_VAR_1
+    - PASSTHROUGH_VAR_2
+  custom:
+    CUSTOM_VAR_1: 11111
+    CUSTOM_VAR_2: 22222
 execution:
   execution_timeout: 60
 logging:

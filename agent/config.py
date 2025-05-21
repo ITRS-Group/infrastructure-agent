@@ -22,10 +22,10 @@ import yaml
 from agent.helpers import merge_dictionary, parse_byte_string
 
 if TYPE_CHECKING:
-    from typing import Callable, Optional, Union
+    from typing import Callable, Iterable, Optional, Union
 
     # Typing for CommandConfig dict from before parsing into a CommandConfig object
-    DictCommandConfig = dict[str, Union[bool, int, str]]
+    DictCommandConfig = dict[str, Union[bool, int, str, dict]]
 
 AGENT_NAME = "Infrastructure Agent"
 
@@ -131,10 +131,11 @@ class CommandConfig(AbstractConfig):
     stderr: bool = True
     long_running_key: Optional[str] = None
     execution_style: ExecutionStyle = DEFAULT_EXECUTION_STYLE
+    environment_variables: Optional[EnvironmentVariableConfig] = None
 
     max_unique_arg_index: int = dataclasses.field(init=False)
 
-    NAME: str = 'commands'
+    NAME: str = dataclasses.field(default='commands', repr=False)
 
     @property
     def path(self):
@@ -264,7 +265,9 @@ class CommandConfig(AbstractConfig):
         return long_running_key
 
     @classmethod
-    def from_dict(cls, config: dict[str, DictCommandConfig]) -> dict[str, CommandConfig]:
+    def from_dict(
+            cls, config: dict[str, DictCommandConfig], global_environment_variables: EnvironmentVariableConfig
+    ) -> dict[str, CommandConfig]:
         """
         Creates a dictionary mapping command names (str) to CommandConfig objects containing
         configuration for a given command.
@@ -277,6 +280,31 @@ class CommandConfig(AbstractConfig):
                 path = command_cfg['path']
                 execution_style = cls._get_execution_style(command_cfg, name)
 
+                # Default to using the global environment variable config...
+                environment_variables = global_environment_variables
+
+                try:
+                    # ...Unless this command has its own environment_variables
+                    environment_variables_dict: dict = command_cfg['environment_variables']
+                    if environment_variables_dict is None:
+                        # An explicitly set null value will disable Environment Vars entirely
+                        startup_log(f"Command '{name}' has explicitly disabled ALL environment variables.")
+                        environment_variables = EnvironmentVariableConfig()
+                    else:
+                        for section in ('custom', 'passthrough'):
+                            try:
+                                # Check if this dict has a value for this
+                                if not environment_variables_dict[section]:
+                                    startup_log(
+                                        f"Command '{name}' has explicitly disabled "
+                                        f"'{section}' environment variables"
+                                    )
+                            except KeyError:
+                                environment_variables_dict[section] = getattr(global_environment_variables, section)
+                        environment_variables = EnvironmentVariableConfig.from_dict(environment_variables_dict)
+                except KeyError:
+                    pass
+
                 commands[name] = cls(
                     name=name,
                     path=path,
@@ -284,7 +312,8 @@ class CommandConfig(AbstractConfig):
                     cache_manager=command_cfg.get('cache_manager', False),
                     stderr=command_cfg.get('stderr', True),
                     long_running_key=cls._get_long_running_key(command_cfg, execution_style, name, path),
-                    execution_style=execution_style
+                    execution_style=execution_style,
+                    environment_variables=environment_variables
                 )
         except KeyError as ex:
             raise ConfigurationError(f"Missing '{cls.NAME}' configuration for '{name}', section: {ex}")
@@ -317,15 +346,15 @@ class CacheManagerConfig(AbstractConfig):
     port: int
     housekeeping_interval: int
     timestamp_error_margin: int
-    # The 2 max* attributes will be read as ints once we've finished initialising this
-    # config object but are read as strings from the config so we that users can
+    # The 2 max_* attributes will be read as ints once we've finished initialising this
+    # config object, but are read as strings from the config so we that users can
     # use values like "1GB" instead of having to type 107374182
     max_cache_size: int
     max_item_size: int
     tls_enabled: bool = False
     tls: TLSConfig = None
 
-    NAME: str = 'cachemanager'
+    NAME: str = dataclasses.field(default='cachemanager', repr=False)
 
     def __post_init__(self):
         self.max_cache_size: int = parse_byte_string(self.max_cache_size) or 107374182  # 1GB
@@ -340,7 +369,59 @@ class ExecutionConfig(AbstractConfig):
     """
     execution_timeout: int
 
-    NAME: str = 'execution'
+    NAME: str = dataclasses.field(default='execution', repr=False)
+
+
+@dataclasses.dataclass
+class EnvironmentVariableConfig(AbstractConfig):
+    """
+    Class to store configuration for environment variables.
+    """
+    # Environment variables to pass directly through to the executing plugin
+    passthrough: list[str] = dataclasses.field(default_factory=list)
+
+    # Environment variables to set for the executing plugin
+    custom: dict[str, str] = dataclasses.field(default_factory=dict)
+
+    NAME: str = dataclasses.field(default='environment_variables', repr=False)
+
+    def __post_init__(self):
+        # Environment variables must be strings!
+        self.custom = {key: str(val) for key, val in self.custom.items()}
+        self._validate_var_names(self.passthrough, 'passthrough')
+        self._validate_var_names(self.custom.keys(), 'custom')
+
+    @staticmethod
+    def _validate_var_names(key_names: Iterable[str], section_name: str):
+        for var_name in key_names:
+            if not isinstance(var_name, str):
+                raise ConfigurationError(
+                    f"'{section_name}' environment variable names must be strings "
+                    f"(found {type(var_name).__name__} {var_name})"
+                )
+
+            var_bad_type = None
+            for bad_type in (int, float):
+                try:
+                    bad_type(var_name)
+                except ValueError:
+                    pass
+                else:
+                    var_bad_type = bad_type
+                    break
+
+            if var_bad_type:
+                raise ConfigurationError(
+                    f"'{section_name}' environment variable names must not be numbers "
+                    f"(found {var_bad_type.__name__} '{var_name}')"
+                )
+
+    @classmethod
+    def from_dict(cls, config: dict):
+        return cls(
+            passthrough=config.get('passthrough') or [],
+            custom=config.get('custom') or {}
+        )
 
 
 @dataclasses.dataclass
@@ -360,7 +441,7 @@ class ServerConfig(AbstractConfig):
     housekeeping_interval: int
     allow_multi_packet_response: bool
 
-    NAME: str = 'server'
+    NAME: str = dataclasses.field(default='server', repr=False)
     bind_address: str = ''
 
     def __post_init__(self):
@@ -385,6 +466,7 @@ class AgentConfig(AbstractConfig):
     # A dictionary mapping runtime names (i.e. python) to the path the binary is stored in.
     # This is required on Windows to run non-executable files (python/perl scripts).
     windows_runtimes: dict[str, str] = dataclasses.field(repr=False)
+    environment_variables: EnvironmentVariableConfig = dataclasses.field(repr=False)
     version: str
     process_recycle_time: int
 
@@ -392,16 +474,18 @@ class AgentConfig(AbstractConfig):
     def from_dict(cls, config: dict):
         """Build the agent configuration from a dict"""
         try:
+            environment_variables = EnvironmentVariableConfig.from_dict(config['environment_variables'])
             return cls(
                 agent_name=AGENT_NAME,
                 cachemanager=CacheManagerConfig.from_dict(config['cachemanager']),
-                commands=CommandConfig.from_dict(config['commands']),
+                commands=CommandConfig.from_dict(config['commands'], environment_variables),
                 execution=ExecutionConfig.from_dict(config['execution']),
                 logging=config['logging'],
                 poller_schedule=config['poller_schedule'],
                 server=ServerConfig.from_dict(config['server']),
                 version=config['version'],
                 windows_runtimes=config.get('windows_runtimes', {}),
+                environment_variables=environment_variables,
                 process_recycle_time=config['process_recycle_time'],
             )
         except KeyError as ex:
@@ -436,7 +520,7 @@ def create_default_user_config_if_required() -> bool:
 
 def get_config(logger: Callable) -> AgentConfig:
     """Reads the configuration file(s) and returns an AgentConfig from the contents within."""
-    def open_yaml(path: str):
+    def open_yaml(path: Union[str, Path]):
         startup_log(f"Reading config file '{path}'")
         with open(path, 'r') as f:
             return yaml.safe_load(f)
