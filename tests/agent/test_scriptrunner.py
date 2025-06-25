@@ -132,7 +132,7 @@ def test_scriptrunner_build_env(
             False,
             None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
-            ['WARNING ', "Command 'unknown' requested but not configured"],
+            ['WARNING ', "COMMAND UNKNOWN: 'unknown' requested but not configured"],
             id="unknown_without_args",
         ),
         pytest.param(
@@ -142,7 +142,7 @@ def test_scriptrunner_build_env(
             False,
             None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
-            ['WARNING ', "Command 'unknown' requested but not configured"],
+            ['WARNING ', "COMMAND UNKNOWN: 'unknown' requested but not configured"],
             id="unknown_with_args",
         ),
         pytest.param(
@@ -152,7 +152,7 @@ def test_scriptrunner_build_env(
             True,
             None,
             (3, "COMMAND FAILURE: Failed to parse command arguments.", '', False),
-            ['WARNING', "Command 'command' Unable to parse arguments"],
+            ['WARNING', "COMMAND FAILURE: 'command' Failed to parse command arguments"],
             id="unparsable_args",
         ),
     ],
@@ -457,7 +457,7 @@ def test_scriptrunner_execute_file_not_found(mocker, scriptrunner, caplog):
 
     expected = (EXIT_CODE_UNKNOWN, f"COMMAND FAILURE: Command not found: '{cmd_path}'.", '', False)
     assert scriptrunner._execute('command', cmd_config, [cmd_path, 'arg'], {}) == expected
-    assert f"Unable to find command '{cmd_path}'" in caplog.text
+    assert f"COMMAND FAILURE: Command not found: '{cmd_path}'" in caplog.text
 
 
 @pytest.mark.parametrize(

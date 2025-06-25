@@ -1,0 +1,91 @@
+<!-- Infrastructure Agent Installer Bundle -->
+<!-- Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+
+    <Bundle Name="Infrastructure Agent" Manufacturer="ITRS Group Ltd"
+        UpgradeCode="9c733c89-efa1-4f84-a589-1b7e184d4332"
+        Version="$(var.AgentVersion)"
+        IconSourceFile="icon.ico"
+        HelpUrl="https://docs.itrsgroup.com/docs/infrastructure-agent/$(var.AgentMajorMinorVersion).0/"
+        AboutUrl="https://support.itrsgroup.com/"
+        DisableModify="yes">
+
+        <Variable Name="VERSION" Value="$(var.AgentVersion)" />
+        <Variable Name="DOCS_VERSION" Value="$(var.AgentMajorMinorVersion).0" />
+
+        <!-- Currently combining the Infra Agent BSD-3 License and Microsoft EULA into one file as the VC redist EXE doesn't display -->
+        <!-- Need to patch the theme manually to resolve issues displaying icons -->
+        <BootstrapperApplication>
+            <bal:WixStandardBootstrapperApplication
+                LicenseFile="BUNDLE_EULA.rtf"
+                Theme="rtfLicense"
+                ThemeFile="bundle_theme.xml"
+                SuppressOptionsUI="yes" />
+            <Payload Name="icon.ico" SourceFile="icon.ico" Compressed="yes" />
+        </BootstrapperApplication>
+
+        <!-- Separate vars allow us to pass these through from the bundle down to the agent MSI -->
+        <Variable Name="SET_FIREWALL_RULE_PRIVATE" Type="string" Value="0" bal:Overridable="yes" />
+        <Variable Name="SET_FIREWALL_RULE_PUBLIC" Type="string" Value="0" bal:Overridable="yes" />
+        <Variable Name="SET_FIREWALL_RULE_DOMAIN" Type="string" Value="0" bal:Overridable="yes" />
+
+        <!-- Only require specific EULA flag if we are: doing a new install, and not using the UI -->
+        <!-- By setting this flag, you agree to the license terms and conditions -->
+        <Variable Name="ACCEPT_EULA" Type="string" Value="0" bal:Overridable="yes" />
+        <!-- WixBundleUILevel: Unknown=0, Embedded=1, None=2, Passive=3, Full=4 (https://github.com/wixtoolset/wix/blob/2f00cbe680fb01ab485d56f16de9cd19b133f875/src/api/burn/inc/BootstrapperApplicationTypes.h#L14) -->
+        <bal:Condition Message="Quiet installs require ACCEPT_EULA=1 to be set. By setting this flag, you agree to the license terms and conditions." Condition="(WixBundleInstalled = 1) OR (WixBundleUILevel &gt; 3) OR (ACCEPT_EULA = 1)" />
+
+        <Chain>
+            <!--
+            Visual C++ Redistributable
+            ========================================================
+            This is a prerequisite of the Infra Agent - installing via the Redist exe here allows windows
+            to manage updates for us, and we don't need to copy in specific DLLs.
+
+            This requires a valid Visual Studio License to redistribute.
+            See LICENSE_MICROSOFT_VCPP for license information.
+
+            DetectCondition is set to (WixBundleInstalled = 1). This means that if this bundle is installed,
+            WiX will think the EXE is already installed too.
+
+            InstallCondition is set to (WixBundleInstalled != 1). This means that if this bundle is not
+            already installed, WiX will only then consider installing the EXE.
+
+            Permanent is set to "yes" which stops this bundle from uninstalling the EXE.
+
+            Vital is set to "no" which means that if the EXE fails to install, the bundle will not fail.
+            For example, the EXE could fail to install if the user already has a newer version installed.
+            So this effectively becomes a "best effort" install.
+            Users that encounter issues with a missing VC redist can use our public docs to debug the issue and will
+            be able to install it manually to resolve problems.
+            -->
+            <ExePackage
+                Id="VC_REDIST_X64"
+                SourceFile="vc_redist/VC_redist.x64.exe"
+                Cache="remove"
+                Compressed="yes"
+                PerMachine="yes"
+                Protocol="burn"
+                Bundle="yes"
+                Vital="no"
+                InstallArguments="/install /norestart"
+                DetectCondition="(WixBundleInstalled = 1)"
+                InstallCondition="(WixBundleInstalled &lt;&gt; 1)"
+                Permanent="yes"
+            />
+            <!-- Our own agent MSI package is vital, and we want to ensure we display any UI from that. -->
+            <MsiPackage
+                Id="InfraAgentMSI"
+                SourceFile="$(var.InfraAgentMSIFile)"
+                Vital="yes"
+                bal:DisplayInternalUICondition="1"
+                ForcePerMachine="yes"
+                Cache="remove">
+                <MsiProperty Name="SET_FIREWALL_RULE_PRIVATE" Value="[SET_FIREWALL_RULE_PRIVATE]" />
+                <MsiProperty Name="SET_FIREWALL_RULE_PUBLIC" Value="[SET_FIREWALL_RULE_PUBLIC]" />
+                <MsiProperty Name="SET_FIREWALL_RULE_DOMAIN" Value="[SET_FIREWALL_RULE_DOMAIN]" />
+            </MsiPackage>
+        </Chain>
+    </Bundle>
+</Wix>

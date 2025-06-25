@@ -5,13 +5,16 @@
 3. [Installation](#Installation)
 
 ## Prerequisites
-* [Python 3.9.x with the `venv` module installed](https://www.python.org/)
+* [Python 3.13.x with the `venv` module installed](https://www.python.org/)
 * [.NET 3.5 via Windows Server Manager](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/enable-net-framework-35-by-using-the-add-roles-and-features-wizard)
 * [Git for Windows](https://git-scm.com/downloads/win)
 * [WiX Toolset 5.0](https://github.com/wixtoolset/wix/)
   * The WiX applications `wix` and `heat` need to be added to the environment's `PATH` for the build scripts to use them.
   * In a standard installation of the toolset these can be found in `C:\Program Files\WiX Toolset v5.0\bin` and `C:\Program Files\WiX Toolset v5.0\bin\x64`.
+  * The `WixToolset.BootstrapperApplications.wixext` extension is required (this is likely enabled by default).
 * [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+  * The Visual C++ Redistributable installer must be downloaded and added at the location `vc_redist/VC_redist.x64.exe`.
+  * This is licensed by Microsoft and is under distribution restrictions.
 
 ## Build Instructions
 * Clone the [_infrastructure-agent_](https://github.com/ITRS-Group/infrastructure-agent),
@@ -42,7 +45,7 @@ pip install -r requirements.txt -c constraints.txt
 ```
 build_windows.bat
 ```
-* The agent should be built and be available in the `src` directory `infrastructure-agent-<version>.msi`.
+* The agent should be built and be available in the `src` directory `infrastructure-agent-installer-<version>.exe` - this EXE bundle contains the actual agent MSI and required Visual C++ Redistributable installer.
 
 ## Installation
 * Execute the Infrastructure Agent Follow MSI.

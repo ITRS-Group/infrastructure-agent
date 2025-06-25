@@ -194,7 +194,7 @@ def test_cachemanager_housekeeping(cachemanager, mocker):
     cachemanager._running = True
     mock_sleep = mocker.patch('agent.cachemanager.gevent.sleep', side_effect=_stop_cm)
     cachemanager.housekeeping(42)
-    assert mock_sleep.called_with(42)
+    mock_sleep.assert_called_with(42)
     assert mock_cache.housekeeping.called
 
 

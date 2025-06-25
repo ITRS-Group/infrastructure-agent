@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) .NET Foundation and contributors. All rights reserved. Licensed under the Microsoft Reciprocal License. See LICENSE.TXT file in the project root for full license information. -->
+
+<!-- NOTE: This file originally sourced from https://github.com/wixtoolset/wix/blob/v5.0.1/src/ext/Bal/stdbas/Resources/RtfTheme.xml -->
+<!-- Updated as follows:
+     - update title/caption
+     - include Window/@IconFile as ITRS icon
+     - edited ImageControl/@ImageFile for ITRS icon
+     - removed unused elements (options, modify, repair, restart etc.)
+     - worked around help page bug -->
+<!-- See issue https://github.com/wixtoolset/issues/issues/8104, https://github.com/orgs/wixtoolset/discussions/8604 -->
+<!-- See LICENSE_WIX_THEME for license information. -->
+
+<Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil">
+	<Font Id="0" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
+	<Font Id="1" Height="-24" Weight="500" Foreground="windowtext">Segoe UI</Font>
+	<Font Id="2" Height="-22" Weight="500" Foreground="graytext">Segoe UI</Font>
+	<Font Id="3" Height="-12" Weight="500" Foreground="windowtext" Background="window">Segoe UI</Font>
+
+	<Window Width="485" Height="540" HexStyle="100a0000" FontId="0" Caption="#(loc.Title) Installer [VERSION]" IconFile="icon.ico">
+		<ImageControl X="11" Y="11" Width="64" Height="64" ImageFile="icon.ico" Visible="yes"/>
+		<Label X="80" Y="11" Width="-11" Height="64" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title) [VERSION]</Label>
+
+		<!-- Mimic help page with conditions here, with hardcoded contents -->
+		<!-- WixBundleAction/WixBundleCommandLineAction: 1 = BOOTSTRAPPER_ACTION_HELP (https://github.com/wixtoolset/wix/blob/390ee54c29d050ba393ff431115308bdb2aaf4ca/src/api/burn/inc/BootstrapperEngineTypes.h#L18) -->
+		<Label Visible="no" VisibleCondition="(WixBundleAction = 1) OR (WixBundleCommandLineAction = 1)" X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">Installer Usage</Label>
+		<Label Visible="no" VisibleCondition="(WixBundleAction = 1) OR (WixBundleCommandLineAction = 1)" X="11" Y="112" Width="-11" Height="-35" FontId="3" DisablePrefix="yes">Options:&#xA;&#xA;/help - show this text&#xA;&#xA;/install - installs the Infrastructure Agent. Install is the default behaviour.&#xA;   The SET_FIREWALL_RULE_PRIVATE, SET_FIREWALL_RULE_DOMAIN, and&#xA;   SET_FIREWALL_RULE_PUBLIC parameters can be set to 1 to add, or 0 to not add,&#xA;   relevant firewall rules on their network profile.&#xA;   By default, rules will not be added.&#xA;&#xA;/uninstall - uninstalls the Infrastructure Agent. Relevant firewall rules will be removed.&#xA;&#xA;/passive | /quiet -  displays minimal UI with no prompts or displays no UI and&#xA;   no prompts. By default UI and all prompts are displayed.&#xA;   Passive/quiet installs require ACCEPT_EULA=1 to be set.&#xA;   By setting this flag, you agree to all included license terms and conditions.&#xA;&#xA;&#xA;Notes:&#xA;&#xA;An installation log file is created in your user's hidden AppData\Local\Temp directory.&#xA;&#xA;To manage firewall rules after installation, use the managefirewall.bat script in the agent bin directory, which accepts the same parameters as above.</Label>
+		<Hypertext Visible="no" VisibleCondition="(WixBundleAction = 1) OR (WixBundleCommandLineAction = 1)" X="11" Y="-30" Width="-11" Height="15" FontId="3" >See the &lt;a href=&quot;https://docs.itrsgroup.com/docs/infrastructure-agent/[DOCS_VERSION]/&quot;&gt;documentation&lt;/a&gt; for more information.</Hypertext>
+		<Button Visible="no" VisibleCondition="(WixBundleAction = 1) OR (WixBundleCommandLineAction = 1)" Name="HelpCloseButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+			<Text>#(loc.HelpCloseButton)</Text>
+			<CloseWindowAction />
+		</Button>
+
+		<Page Name="Loading">
+			<Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes" Visible="no" Name="CheckingForUpdatesLabel" />
+		</Page>
+		<Page Name="Install">
+			<Richedit Name="EulaRichedit" X="11" Y="80" Width="-11" Height="-70" TabStop="yes" FontId="0" HexStyle="800000" />
+			<Checkbox Name="EulaAcceptCheckbox" X="-11" Y="-41" Width="260" Height="17" TabStop="yes" FontId="3" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
+			<Button Name="InstallUpdateButton" X="11" Y="-11" Width="200" Height="23" TabStop="yes" FontId="0" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">#(loc.UpdateButton)</Button>
+			<Button Name="InstallButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">#(loc.InstallInstallButton)</Button>
+			<Button Name="InstallCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+				<Text>#(loc.InstallCancelButton)</Text>
+				<CloseWindowAction />
+			</Button>
+		</Page>
+		<Page Name="Progress">
+			<Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">#(loc.ProgressHeader)</Label>
+			<Label X="11" Y="121" Width="70" Height="17" FontId="3" DisablePrefix="yes">#(loc.ProgressLabel)</Label>
+			<Label Name="OverallProgressPackageText" X="85" Y="121" Width="-11" Height="17" FontId="3" DisablePrefix="yes">#(loc.OverallProgressPackageText)</Label>
+			<Progressbar Name="OverallCalculatedProgressbar" X="11" Y="143" Width="-11" Height="15" />
+			<Button Name="ProgressCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">#(loc.ProgressCancelButton)</Button>
+		</Page>
+		<Page Name="Modify">
+			<Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">#(loc.ModifyHeader)</Label>
+			<Button Name="UninstallButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">#(loc.ModifyUninstallButton)</Button>
+			<Button Name="ModifyCancelButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+				<Text>#(loc.ModifyCancelButton)</Text>
+				<CloseWindowAction />
+			</Button>
+		</Page>
+		<Page Name="Success">
+			<Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">
+				<Text>#(loc.SuccessHeader)</Text>
+				<Text Condition="WixBundleAction = 2">#(loc.SuccessLayoutHeader)</Text>
+				<Text Condition="WixBundleAction = 3">#(loc.SuccessUnsafeUninstallHeader)</Text>
+				<Text Condition="WixBundleAction = 4">#(loc.SuccessUninstallHeader)</Text>
+				<Text Condition="WixBundleAction = 6">#(loc.SuccessInstallHeader)</Text>
+			</Label>
+			<Button Name="SuccessCloseButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+				<Text>#(loc.SuccessCloseButton)</Text>
+				<CloseWindowAction />
+			</Button>
+		</Page>
+		<Page Name="Failure">
+			<Label X="11" Y="80" Width="-11" Height="30" FontId="2" DisablePrefix="yes">
+				<Text>#(loc.FailureHeader)</Text>
+				<Text Condition="WixBundleAction = 2">#(loc.FailureLayoutHeader)</Text>
+				<Text Condition="WixBundleAction = 3">#(loc.FailureUnsafeUninstallHeader)</Text>
+				<Text Condition="WixBundleAction = 4">#(loc.FailureUninstallHeader)</Text>
+				<Text Condition="WixBundleAction = 6">#(loc.FailureInstallHeader)</Text>
+			</Label>
+			<Hypertext Name="FailureLogFileLink" X="11" Y="121" Width="-11" Height="42" FontId="3" TabStop="yes" HideWhenDisabled="yes">#(loc.FailureHyperlinkLogText)</Hypertext>
+			<Hypertext Name="FailureMessageText" X="22" Y="163" Width="-11" Height="51" FontId="3" TabStop="yes" HideWhenDisabled="yes" />
+			<Label X="-11" Y="-51" Width="400" Height="34" FontId="3" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.FailureRestartText)</Label>
+			<Button Name="FailureRestartButton" X="-91" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0" HideWhenDisabled="yes">#(loc.FailureRestartButton)</Button>
+			<Button Name="FailureCloseButton" X="-11" Y="-11" Width="75" Height="23" TabStop="yes" FontId="0">
+				<Text>#(loc.FailureCloseButton)</Text>
+				<CloseWindowAction />
+			</Button>
+		</Page>
+	</Window>
+</Theme>

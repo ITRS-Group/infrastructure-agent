@@ -1,6 +1,7 @@
 # Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 # Dependencies of the libraries listed in requirements.txt
 
-greenlet==2.0.2
-zope.event==4.6
-zope.interface==6.0
+Brotli==1.1.0
+urllib3==2.4.0
+certifi-2025==4.26
+

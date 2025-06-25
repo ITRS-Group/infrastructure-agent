@@ -1,13 +1,27 @@
 # Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 # Python libraries used by (or to build) the infrastructure-agent
 
-cffi==1.15.1
-cryptography==41.0.1
-cx-Freeze==6.15.1
-gevent==22.10.2
+cffi==1.15.1 ; python_version < '3.10'
+cffi==1.17.1 ; python_version >= '3.13'
+cryptography==41.0.1 ; python_version < '3.10'
+cryptography==45.0.3 ; python_version >= '3.13'
+cx-Freeze==6.15.1 ; python_version < '3.10'
+cx-freeze==8.3.0 ; python_version >= '3.13'
+gevent==22.10.2 ; python_version < '3.10'
+gevent==25.5.1 ; python_version >= '3.13'
+geventhttpclient==2.3.3
+greenlet==2.0.2 ; python_version < '3.10'
+greenlet==3.2.2 ; python_version >= '3.13'
 patchelf==0.17.2.1; sys_platform != 'win32'
-psutil==5.9.5; sys_platform == 'win32'
-pycparser==2.21
-pycryptodome==3.18.0
-PyYAML==6.0
+psutil==7.0.0; sys_platform == 'win32'
+pycparser==2.21 ; python_version < '3.10'
+pycparser==2.22 ; python_version >= '3.13'
+pycryptodome==3.18.0 ; python_version < '3.10'
+pycryptodome==3.23.0 ; python_version >= '3.13'
+PyYAML==6.0 ; python_version < '3.10'
+PyYAML==6.0.2 ; python_version >= '3.13'
 sortedcontainers==2.4.0
+zope.event==4.6 ; python_version < '3.10'
+zope.event==5.0 ; python_version >= '3.13'
+zope.interface==6.0 ; python_version < '3.10'
+zope.interface==7.2 ; python_version >= '3.13'

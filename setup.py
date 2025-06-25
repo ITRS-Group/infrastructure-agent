@@ -41,7 +41,7 @@ elif sys.platform.startswith('win32'):
     build_exe_options = build_exe_options | {
         "include_files": ["icon.ico"],
         "includes": ["cx_Logging", "win_svce_handler"],
-        "include_msvcr": True
+        # Not setting include_msvcr as we bundle the eventual MSI with the Visual C++ redistributable installer
     }
 else:
     executables = [

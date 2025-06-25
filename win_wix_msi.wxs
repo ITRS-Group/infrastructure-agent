@@ -1,0 +1,127 @@
+<!-- Infrastructure Agent MSI -->
+<!-- Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+    <Package Name="Infrastructure Agent" Manufacturer="ITRS Group Ltd"
+        UpgradeCode="9c733c89-efa1-4f84-a589-1b7e184d4332"
+        Language="1033" Codepage="1252" Version="$(var.AgentVersion)"
+        InstallerVersion="200">
+
+        <SummaryInformation Keywords="Installer" Description="Infrastructure Agent Installer" Manufacturer="ITRS Group" />
+
+        <MajorUpgrade DowngradeErrorMessage="A later version of [ProductName] is already installed. Setup will now exit." />
+
+        <Media Id="1" Cabinet="InfraAgent.cab" EmbedCab="yes" DiskPrompt="CD-ROM #1" />
+        <Property Id="DiskPrompt" Value="Infrastructure Agent Disk [1]" />
+
+        <!-- Set Add/Remove programs icon -->
+        <Icon Id="icon.ico" SourceFile="icon.ico"/>
+        <Property Id="ARPPRODUCTICON" Value="icon.ico" />
+
+        <!-- Include files -->
+        <Feature Id="Complete" Level="1">
+            <Files Include="$(var.SourceDir)\**" Directory="INSTALLDIR" />
+        </Feature>
+
+        <!-- Create extra directories in the install dir -->
+        <Feature Id="ExtraDirs" Level="1">
+            <Component Id="CreateExtraDirectories" Guid="41064439-9856-4e5b-b753-ca00ef209cca" Directory="LOGDIR">
+                <CreateFolder Directory="LOGDIR" />
+                <CreateFolder Directory="CFGDIR" />
+                <CreateFolder Directory="CUSTOMCFGDIR" />
+                <CreateFolder Directory="PLUGINSDIR" />
+                <CreateFolder Directory="IMPORTEDPLUGINSGDIR" />
+            </Component>
+        </Feature>
+
+        <StandardDirectory Id="ProgramFiles6432Folder">
+            <Directory Id="INSTALLDIR" Name="Infrastructure Agent">
+                <Directory Id="LOGDIR" Name="logs" />
+                <Directory Id="CFGDIR" Name="cfg">
+                    <Directory Id="CUSTOMCFGDIR" Name="custom" />
+                </Directory>
+                <Directory Id="PLUGINSDIR" Name="plugins">
+                    <Directory Id="IMPORTEDPLUGINSGDIR" Name="imported" />
+                </Directory>
+            </Directory>
+        </StandardDirectory>
+
+        <!-- Define service install/uninstall commands -->
+        <CustomAction Id="InstallService" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            Return="check" ExeCommand="[INSTALLDIR]\bin\infra-svce.exe --install Agent"
+        />
+
+        <CustomAction Id="UnInstallService" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            Return="check" ExeCommand="[INSTALLDIR]\bin\infra-svce.exe --uninstall Agent"
+        />
+
+        <!-- Define firewall rules -->
+        <Property Id="FIREWALL_DIALOG_ACCEPTED" Value="0" />
+
+        <!-- These separate properties allow bundles around this MSI to inject firewall variables -->
+        <Property Id="SET_FIREWALL_RULE_PRIVATE" Value="0"/>
+        <Property Id="SET_FIREWALL_RULE_PUBLIC" Value="0"/>
+        <Property Id="SET_FIREWALL_RULE_DOMAIN" Value="0"/>
+
+        <UI>
+            <Dialog Id="FirewallProfileDialog" Width="370" Height="250" Title="Select Firewall Profiles">
+                <!-- Description text -->
+                <Control Id="DescriptionText" Type="Text" X="15" Y="10" Width="340" Height="30" Transparent="yes" NoPrefix="yes"
+                    Text="Select the network profiles for which to create firewall rules to allow the Infrastructure Agent to receive traffic." />
+                <!-- Group box for clarity -->
+                <Control Id="ProfileGroupBox" Type="GroupBox" X="10" Y="45" Width="350" Height="120" Text="Firewall Profiles" />
+                <!-- Profile Checkboxes -->
+                <Control Id="DomainCheckbox" Type="CheckBox" X="30" Y="65" Width="300" Height="20"
+                    Property="FIREWALL_RULE_DOMAIN" Text="Domain Profile" CheckBoxValue="1" />
+                <Control Id="PublicCheckbox" Type="CheckBox" X="30" Y="90" Width="300" Height="20"
+                    Property="FIREWALL_RULE_PUBLIC" Text="Public Profile" CheckBoxValue="1" />
+                <Control Id="PrivateCheckbox" Type="CheckBox" X="30" Y="115" Width="300" Height="20"
+                    Property="FIREWALL_RULE_PRIVATE" Text="Private Profile" CheckBoxValue="1" />
+                <!-- Buttons -->
+                <Control Id="CancelButton" Type="PushButton" X="210" Y="200" Width="70" Height="23" Text="Cancel" Cancel="yes">
+                    <Publish Event="EndDialog" Value="Exit" />
+                </Control>
+                <Control Id="NextButton" Type="PushButton" X="290" Y="200" Width="70" Height="23" Text="Apply">
+                    <Publish Property="FIREWALL_DIALOG_ACCEPTED" Value="1" />
+                    <Publish Event="EndDialog" Value="Return" />
+                </Control>
+            </Dialog>
+        </UI>
+
+        <CustomAction Id="AddDomainFirewallRule" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            ExeCommand="netsh advfirewall firewall add rule name=&quot;Infrastructure Agent&quot; dir=in action=allow program=&quot;[INSTALLDIR]bin\infra-agent.exe&quot; enable=yes profile=domain protocol=TCP"
+            Return="check" />
+
+        <CustomAction Id="AddPublicFirewallRule" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            ExeCommand="netsh advfirewall firewall add rule name=&quot;Infrastructure Agent&quot; dir=in action=allow program=&quot;[INSTALLDIR]bin\infra-agent.exe&quot; enable=yes profile=public protocol=TCP"
+            Return="check" />
+
+        <CustomAction Id="AddPrivateFirewallRule" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            ExeCommand="netsh advfirewall firewall add rule name=&quot;Infrastructure Agent&quot; dir=in action=allow program=&quot;[INSTALLDIR]bin\infra-agent.exe&quot; enable=yes profile=private protocol=TCP"
+            Return="check" />
+
+        <CustomAction Id="RemoveAllFirewallRules" Directory="INSTALLDIR"
+            Execute="deferred" Impersonate="no"
+            ExeCommand="netsh advfirewall firewall delete rule name=&quot;Infrastructure Agent&quot;"
+            Return="ignore" />
+
+        <InstallUISequence>
+            <Show Dialog="FirewallProfileDialog" Before="CostFinalize" Condition="NOT REMOVE" />
+        </InstallUISequence>
+
+        <InstallExecuteSequence>
+            <Custom Action="InstallService" After="InstallFiles" Condition="(NOT Installed) AND (NOT REMOVE)" />
+            <Custom Action="UnInstallService" After="InstallInitialize" Condition="(REMOVE=&quot;ALL&quot;)" />
+            <Custom Action="RemoveAllFirewallRules" After="InstallInitialize" Condition="(REMOVE=&quot;ALL&quot;)" />
+            <Custom Action="AddDomainFirewallRule" After="InstallFiles" Condition="((SET_FIREWALL_RULE_DOMAIN=1) OR (FIREWALL_RULE_DOMAIN=1)) AND (NOT REMOVE)" />
+            <Custom Action="AddPublicFirewallRule" After="InstallFiles" Condition="((SET_FIREWALL_RULE_PUBLIC=1) OR (FIREWALL_RULE_PUBLIC=1)) AND (NOT REMOVE)" />
+            <Custom Action="AddPrivateFirewallRule" After="InstallFiles" Condition="((SET_FIREWALL_RULE_PRIVATE=1) OR (FIREWALL_RULE_PRIVATE=1)) AND (NOT REMOVE)" />
+        </InstallExecuteSequence>
+
+    </Package>
+</Wix>

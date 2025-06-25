@@ -86,7 +86,7 @@ class ScriptRunner:
         try:
             command_config = self.command_config[command]
         except KeyError:
-            logger.warning("Command '%s' requested but not configured", command)
+            logger.warning("COMMAND UNKNOWN: '%s' requested but not configured", command)
             return ServiceReturnCodes.UNKNOWN.value, f"COMMAND UNKNOWN: Command '{command}' not defined.", "", False
 
         if command_config.max_unique_arg_index > len(arguments):
@@ -101,7 +101,7 @@ class ScriptRunner:
             )
         except Exception:
             # Do not log the arguments since they may contain sensitive data.
-            logger.warning("Command '%s' Unable to parse arguments", command)
+            logger.warning("COMMAND FAILURE: '%s' Failed to parse command arguments", command)
             return ServiceReturnCodes.UNKNOWN.value, "COMMAND FAILURE: Failed to parse command arguments.", "", False
 
         return self._execute(command, command_config, args, kwargs)
@@ -172,7 +172,7 @@ class ScriptRunner:
                 # execution_style is ExecutionStyle.COMMAND_LINE_ARGS:
                 proc = subprocess.Popen(args, **kwargs)
         except FileNotFoundError:
-            logger.warning("Unable to find command '%s'", command_path)
+            logger.warning("COMMAND FAILURE: Command not found: '%s'", command_path)
             return (
                 ServiceReturnCodes.UNKNOWN.value,
                 f"COMMAND FAILURE: Command not found: '{command_path}'.", "", False)

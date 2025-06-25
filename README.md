@@ -27,4 +27,5 @@ Instructions are currently available for building on Linux and Windows:
 
 # License
 The ITRS Infrastructure Agent is provided under the BSD 3-Clause License.
-For more information please read the bundled [LICENSE file](LICENSE).
+Some included elements are licensed separately.
+For more information please read [LICENSING](LICENSING.md).

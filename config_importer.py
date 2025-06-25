@@ -33,6 +33,8 @@ KEY_OP_COMMANDS = 'commands'
 AGENT_PATH_LINUX = '/opt/opsview/agent'
 AGENT_PATH_WINDOWS = 'C:/Program Files/Opsview Agent'
 
+OLD_AGENT_CONFIG_COPY_DIR = '/opt/itrs/infrastructure-agent/var/old_agent_config_copy'
+
 RE_COMMAND_NIX = re.compile(r'(?P<dir>[\w/\-.]*/)?(?P<check>check_[\w\-.]+)')
 RE_COMMAND_WIN = re.compile(r'(?P<dir>(?:[A-Z]:)?[\w \\\-/)(.]+[\\/])?(?P<check>check_[\w\-.]+)')
 
@@ -54,6 +56,8 @@ def clean_split(line: str, delim=','):
     """Helper method to convert a delimited string into a clean list"""
     if line is None:
         return line
+    if not line.strip():
+        return []
     parts: list[str] = line.split(delim)
     return [p.strip() for p in parts]
 
@@ -83,11 +87,12 @@ class BaseReader(ABC):
     """Abstract base class for configuration file readers"""
 
     @abstractmethod
-    def scan_config(self, existing_plugins: set[str]) -> (dict[str, str], str, str):
+    def scan_config(self, existing_plugins: set[str]) -> tuple[bool, dict[str, str], str, int]:
         command_dict: dict[str, str] = {}
+        scanned_config_successfully: bool = False
         allowed_hosts: str = ''
         server_port: int = 0
-        return command_dict, allowed_hosts, server_port
+        return scanned_config_successfully, command_dict, allowed_hosts, server_port
 
     @abstractmethod
     def get_agent_dir(self) -> str:
@@ -103,8 +108,10 @@ class CfgReader(BaseReader):
 
     RE_COMMAND = re.compile(r'command\[([\w-]+)]')
 
-    def scan_config(self, existing_plugins: set[str]) -> (dict[str, str], str, str):
-        data_dict = self._read_file_data(os.path.join(AGENT_PATH_LINUX, 'etc/nrpe.cfg'))
+    def scan_config(self, existing_plugins: set[str]) -> tuple[bool, dict[str, str], str, int]:
+        # On linux, we make a copy of the old config file that is readable by the infra agent user
+        # as well as any referenced included files
+        data_dict = self._read_file_data(os.path.join(OLD_AGENT_CONFIG_COPY_DIR, 'nrpe.cfg'))
         command_dict = {}
         allowed_hosts = None
         server_port = None
@@ -120,7 +127,7 @@ class CfgReader(BaseReader):
                     if command_name not in existing_plugins:
                         command_dict[command_name] = value
                         logger.debug("Command: %s: %s", command_name, value)
-        return command_dict, allowed_hosts, server_port
+        return bool(data_dict), command_dict, allowed_hosts, server_port
 
     def get_agent_dir(self) -> str:
         return AGENT_PATH_LINUX
@@ -184,7 +191,7 @@ class IniReader(BaseReader):
         'check_ssl',
     }
 
-    def scan_config(self, existing_plugins: set[str]) -> (dict, str, str):
+    def scan_config(self, existing_plugins: set[str]) -> tuple[bool, dict, str, int]:
         config = configparser.ConfigParser(allow_no_value=True, strict=False)
         config.read(os.path.join(AGENT_PATH_WINDOWS, 'opsview.ini'))
         custom_plugins = {}
@@ -206,7 +213,7 @@ class IniReader(BaseReader):
             logger.debug("allowed_hosts=%s", allowed_hosts)
         except KeyError:
             allowed_hosts = None
-        return custom_plugins, allowed_hosts, server_port
+        return bool(config), custom_plugins, allowed_hosts, server_port
 
     def get_agent_dir(self) -> str:
         return AGENT_PATH_WINDOWS
@@ -252,7 +259,7 @@ class ConfigImporter:
         os.makedirs(output_config_dir, exist_ok=True)
         rdr: BaseReader = create_config_reader(self._is_win)
         existing_plugins = set(self._existing_config.commands.keys())
-        custom_plugins, allowed_hosts, server_port = rdr.scan_config(existing_plugins)
+        scanned_config_successfully, custom_plugins, allowed_hosts, server_port = rdr.scan_config(existing_plugins)
         data_dict = {}
         if custom_plugins:
             copied_plugins = {}
@@ -266,20 +273,65 @@ class ConfigImporter:
                     copied_plugins[command_name] = {'path': new_command_line}
             if copied_plugins:
                 data_dict[KEY_OP_COMMANDS] = copied_plugins
-        if allowed_hosts or server_port:
+
+        # Some logic follows to migrate over `allowed_hosts` satisfactorily for all cases.
+        #
+        # Note on `allowed_hosts` variable at this point, assuming we read old config successfully:
+        # If it is [], that means it was set without a value in the old agent.
+        # If it is None, it means the old agent did not have `allowed_hosts` set at all in config.
+        #
+        # On either platform, if `allowed_hosts` was set to some values, we want to migrate that.
+        add_allowed_hosts_warning = False
+        insert_allowed_hosts = bool(allowed_hosts)
+
+        # Then handle some edge cases where we still want to migrate to equivalent behaviour.
+        # We only do this if `scanned_config_successfully` is True. If not, there may have been issues reading the
+        # old config, so we should just default to the new agent's secure behaviour of blocking all hosts.
+        if scanned_config_successfully and not insert_allowed_hosts:
+
+            # for old windows agent:
+            if self._is_win:
+                # `allowed_hosts` being set without a value means allow all hosts.
+                if allowed_hosts == []:  # noqa to avoid IDE 'simplifications' that break the logic...
+                    insert_allowed_hosts = True
+                    add_allowed_hosts_warning = True
+                # `allowed_hosts` not being set means block all hosts - no action, this is the default in the new agent.
+
+            # for old linux agent:
+            else:
+                # `allowed_hosts` not being set means allow all hosts, which we want to migrate.
+                if allowed_hosts is None:
+                    insert_allowed_hosts = True
+                    add_allowed_hosts_warning = True
+                    allowed_hosts = []
+                # `allowed_hosts` being set without a value is not supported at all in the linux agent.
+
+        if insert_allowed_hosts or server_port:
             server_section = {}
-            if allowed_hosts:
+            if insert_allowed_hosts:
                 server_section[KEY_OP_SERVER_ALLOWED_HOSTS] = allowed_hosts
             if server_port:
                 server_section[KEY_OP_SERVER_PORT] = server_port
             data_dict[KEY_OP_SERVER] = server_section
+
         logger.info("Creating imported config file: '%s'", self._output_config_file_path)
         with open(self._output_config_file_path, 'w') as f_out:
             f_out.write('---\n')
-            f_out.write('# Imported configuration file.\n')
+            f_out.write('# Imported configuration file.\n\n')
             f_out.write('# Warning:\n')
             f_out.write('#   If this file is deleted/moved, the import process will be\n')
             f_out.write('#   automatically run again when the Agent next starts.\n\n')
+
+            if add_allowed_hosts_warning:
+                f_out.write('# Warning:\n')
+                f_out.write('#   Your migrated `allowed_hosts` config currently allows any host to connect.\n')
+                f_out.write('#   This could be a security risk. We recommend limiting to expected hosts.\n\n')
+
+                logger.warning(
+                    "The migrated `allowed_hosts` config will allow any host to connect. "
+                    "This could be a security risk. We recommend limiting to expected hosts."
+                )
+
             if data_dict:
                 yaml.dump(data_dict, f_out, width=YAML_LINE_WIDTH)
         os.chmod(self._output_config_file_path, 0o640)

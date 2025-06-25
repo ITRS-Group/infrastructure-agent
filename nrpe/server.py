@@ -11,13 +11,14 @@ import logging
 import ssl
 import time
 import traceback
+import fnmatch
+import re
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from gevent import sleep, socket, spawn, kill, greenlet
 from gevent.lock import Semaphore
 
-from agent.config import ConfigurationError
 from agent.helpers import is_host_in_net_list
 from agent.objects import Result
 from agent.scriptrunner import ScriptRunner
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from agent.config import ServerConfig
     from agent.objects import Platform
     from ssl import SSLSocket
-    from typing import Optional, Type, Union
+    from typing import Optional, Type, Union, Any
     from uuid import UUID
 
 
@@ -41,14 +42,96 @@ class NRPETimeout(Exception):
         super(NRPETimeout, self).__init__(f"Timed out waiting for client data ({value}s)")
 
 
+def is_valid_hostname(hostname: str) -> bool:
+    """
+    Validates the provided hostname based on RFC 1123 and RFC 952.
+    """
+    # Check length of the entire hostname
+    if len(hostname) > 255:
+        return False
+
+    # Split the hostname into labels
+    labels = hostname.split('.')
+    for label in labels:
+        # Each label must be between 1 and 63 characters
+        if len(label) == 0 or len(label) > 63:
+            return False
+        # Labels must only contain alphanumeric characters or hyphens
+        if not re.match(r'^[a-zA-Z0-9-]+$', label):
+            return False
+        # Labels must not start or end with a hyphen
+        if label.startswith('-') or label.endswith('-'):
+            return False
+
+    return True
+
+
+def match_hostname_with_wildcard(pattern: str, hostname: str) -> bool:
+    """
+    Matches a hostname against a wildcard pattern.
+    """
+    if '*' in pattern:
+        # Ensure the wildcard is only in the leftmost label
+        labels = pattern.split('.')
+        if labels[0] == '*' and len(labels) > 1:
+            # Use fnmatch to match the wildcard pattern
+            return fnmatch.fnmatch(hostname, pattern)
+        else:
+            return False
+    else:
+        # No wildcard, perform an exact match
+        return pattern == hostname
+
+
+def _match_hostname(cert: dict[str, Any], hostname: str) -> bool:
+    """
+    Verifies that the given hostname or IP address matches the certificate.
+    replaces the deprecated match_hostname function from the ssl module.
+    """
+    # Check if the hostname is an IP address
+    try:
+        ipaddress.ip_address(hostname)
+        resolved_ips = [hostname]
+        is_ip = True
+    except ValueError:
+        if not is_valid_hostname(hostname):
+            return False
+        try:
+            # Use getaddrinfo to support both IPv4 and IPv6 resolution
+            addr_info = socket.getaddrinfo(hostname, None)
+            resolved_ips = [info[4][0] for info in addr_info]  # Extract resolved IPs
+        except OSError:
+            resolved_ips = []
+        is_ip = False
+
+    # Extract SANs from the certificate
+    san = cert.get('subjectAltName', [])
+    for key, value in san:
+        if key == 'IP Address' and (value == hostname or value in resolved_ips):
+            return True
+        if not is_ip and key == 'DNS' and match_hostname_with_wildcard(value, hostname):
+            return True
+
+    # Fallback to CN if SAN is not present (only for hostnames, not IPs)
+    if not is_ip:
+        for field in cert.get('subject', []):
+            for subfield in field:
+                if subfield[0] == 'commonName' and match_hostname_with_wildcard(subfield[1], hostname):
+                    return True
+
+    return False
+
+
 @dataclasses.dataclass
 class NRPEListener:
     """NRPE Server to listen and respond to NRPE packets sent by clients"""
+
     platform: Platform
     server_config: ServerConfig
     script_runner: ScriptRunner
 
     _host_filtering: bool = True
+    _block_all_hosts: bool = False
     _socket: Union[socket.socket, SSLSocket] = None
 
     MAX_PACKET_SIZE = 1036
@@ -56,14 +139,15 @@ class NRPEListener:
 
     def __post_init__(self):
         self._connected_sockets: dict[(str, int), (socket.socket, greenlet)] = {}
+        self._host_filtering = True
+
         if self.server_config.allowed_hosts is None:
             # allowed_hosts must be explicitly configured to [] to disable host checks
-            error = "'allowed_hosts' has not been configured"
-            logger.error(error)
-            raise ConfigurationError(error)
+            # a null value means that every host will be blocked
+            logger.warning("'allowed_hosts' is currently null, which blocks any host from connecting.")
+            self._block_all_hosts = True
 
-        if isinstance(self.server_config.allowed_hosts, list) and len(self.server_config.allowed_hosts):
-            self._host_filtering = True
+        elif isinstance(self.server_config.allowed_hosts, list) and len(self.server_config.allowed_hosts):
             logged_warning = False
 
             for allowed_host in self.server_config.allowed_hosts:
@@ -115,7 +199,9 @@ class NRPEListener:
         # (the number of unaccepted connections that the system will allow before refusing new connections)
         logger.info(
             "Listening (max queued clients: %i, max active clients: %i)",
-            self.server_config.max_queued_connections, self.server_config.max_active_connections)
+            self.server_config.max_queued_connections,
+            self.server_config.max_active_connections,
+        )
 
         self._reset_connections()
         self._socket.listen(self.server_config.max_queued_connections)
@@ -194,6 +280,12 @@ class NRPEListener:
             conn, address = self._socket.accept()  # accept new connection
             host = address[0]
 
+            # If we are blocking all hosts, reject the connection immediately once we know the host address
+            if self._block_all_hosts:
+                return _reject_connection(
+                    conn, f"Connection rejected: host '{host}', as currently blocking all hosts"
+                )
+
             if self.server_config.tls_enabled:
                 conn.settimeout(self.server_config.tls_handshake_timeout)
                 conn = self.context.wrap_socket(conn, server_side=True)
@@ -227,12 +319,9 @@ class NRPEListener:
     def is_host_allowed_cert(self, client_cert: dict) -> Optional[str]:
         """Certificate host name validation against allowed_hosts list"""
         for hostname in self.server_config.allowed_hosts:
-            try:
-                ssl.match_hostname(client_cert, hostname)
+            if _match_hostname(client_cert, hostname):
                 logger.debug("Host '%s' allowed", hostname)
                 return hostname
-            except ssl.CertificateError:
-                pass
         return None
 
     @staticmethod
@@ -247,6 +336,7 @@ class NRPEListener:
         Validate the hostname or alias against allowed_hosts list
         Results are cached to avoid multiple reverse DNS lookups
         """
+
         def _add_to_cache(remote: str, name: Union[str, None]):
             """add to hostname cache"""
             self._hostname_cache[remote] = name
@@ -331,7 +421,7 @@ class NRPEListener:
                     command_uuid=command_uuid,
                     host=host,
                     command=request_packet.check_name,
-                    arguments=request_packet.check_arguments
+                    arguments=request_packet.check_arguments,
                 ),
                 packet_class=packet_class,
                 allow_multi_packet_response=self.server_config.allow_multi_packet_response,
@@ -356,7 +446,8 @@ class NRPEListener:
         exit_code, response_stdout, response_stderr, early_timeout = self.script_runner.run_script(command, arguments)
         logger.debug(
             "[%s %s] %s, %s, %s, %s",
-            display_uuid, host, exit_code, response_stdout, response_stderr, early_timeout)
+            display_uuid, host, exit_code, response_stdout, response_stderr, early_timeout,
+        )
         # Combine stdout and stderr
         if response_stderr:
             if response_stdout:
@@ -366,8 +457,10 @@ class NRPEListener:
         return Result(command_uuid, exit_code, response_stdout)
 
     @staticmethod
-    def send_result(command_uuid: UUID, host: str, connection: socket.socket,
-                    result: Result, packet_class: Type[AbstractPacket], allow_multi_packet_response: bool):
+    def send_result(
+            command_uuid: UUID, host: str, connection: socket.socket,
+            result: Result, packet_class: Type[AbstractPacket], allow_multi_packet_response: bool,
+    ):
         """Generate the NRPE response and forward it to the client"""
         display_uuid = str(command_uuid)[:6]
         logger.debug("len(result.stdout) = %d", len(result.stdout))
