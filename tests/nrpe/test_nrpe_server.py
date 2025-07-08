@@ -11,7 +11,7 @@ import mock
 import pytest
 
 from nrpe.packet import NRPEPacketV2
-from nrpe.server import NRPEListener
+from nrpe.server import NRPEListener, is_valid_hostname, _match_hostname
 
 
 class SocketTimeout(Exception):
@@ -29,138 +29,136 @@ def server(agent_config, platform_linux, mocker) -> NRPEListener:
     yield svr
 
 
+@pytest.mark.parametrize('hostname, expected', [
+    pytest.param('foo', True, id="bare_hostname"),
+    pytest.param('foo.bar', True, id="FQDN"),
+    pytest.param('opsview@foo.bar', False, id="email_address"),
+    pytest.param('-99.red.balloons', False, id="leading_hyphen"),
+    pytest.param('99-.red.balloons', False, id="trailing_hyphen_hostname"),
+    pytest.param('99.red.balloons-', False, id="trailing_hyphen_domain"),
+    pytest.param('a123456789SixtyThreeCharacters0123456789012345678901234567890xy.foo', True, id="63_char_hostname"),
+    pytest.param('a123456789SixtyFourCharacters90123456789012345678901234567890xyz.foo', False, id="64_char_hostname"),
+    pytest.param(
+        'this.is.a.very.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.actually.works.as'
+        '.expected.I.think.Im.going.to.need.to.repeat.this.as.it.is.not.long.enough.even.now.this.is.a.very'
+        '.long.hostname.just.to.test.that.the.code.for.detecting', True, id="255_char_FQDN",
+        # actually there is an implied trailing . so this is really a 256 char FQDN
+    ),
+    pytest.param(
+        'this.is.a.very.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.actually.works.as'
+        '.expected.I.think.Im.going.to.need.to.repeat.this.as.it.is.not.long.enough.even.now.this.is.a.very'
+        '.long.hostname.just.to.test.that.the.code.for.detecting0', False, id="256_char_FQDN"),
+])
+def test_is_valid_hostname(hostname, expected):
+    assert is_valid_hostname(hostname) == expected
+
+
+@pytest.mark.parametrize('cert, hostname, resolved_ips, expected', [
+    pytest.param(
+        {'subject': ((('commonName', 'hostname.match'),),), 'subjectAltName': (('DNS', 'fred.foo'),)},
+        'hostname.match', [], True, id="CN_match"),
+    pytest.param(
+        {'subject': ((('commonName', '1.2.3.4'),),), 'subjectAltName': (('DNS', 'fred.foo'),)},
+        '1.2.3.4', [], True, id="CN_match_IP"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('DNS', 'hostname.match'),)},
+        'hostname.match', [], True, id="SAN_DNS_match"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('IP Address', '1.2.3.4'),)},
+        '1.2.3.4', [], True, id="SAN_IP_address_match"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('IP Address', '9.8.7.6'),)},
+        '1.2.3.4', ['9.8.7.6'], True, id="SAN_IP_address_match_resolved_address"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('DNS', '9.8.7.6'),)},
+        '1.2.3.4', ['9.8.7.6'], False, id="SAN_DNS_resolved_address"),
+    pytest.param(
+        {'subject': ((('commonName', '9.8.7.6'),),), 'subjectAltName': (('IP Address', '5.6.7.8'),)},
+        '1.2.3.4', ['9.8.7.6'], False, id="CN_resolved_address"),
+    pytest.param(
+        {'subject': ((('commonName', '*.hostname.match'),),), 'subjectAltName': (('DNS', 'fred.foo'),)},
+        'foo.hostname.match', [], True, id="CN_wildcard_match"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('DNS', '*.hostname.match'),)},
+        'foo.hostname.match', [], True, id="SAN_DNS_wildcard_match"),
+    pytest.param(
+        {'subject': ((('commonName', 'fred'),),), 'subjectAltName': (('DNS', '*.hostname.match'),)},
+        'foo.match.hostname', [], False, id="SAN_DNS_no_wildcard_match"),
+])
+def test_match_hostname(cert, hostname, resolved_ips, expected):
+    assert _match_hostname(cert, hostname, resolved_ips) == expected
+
+
 @pytest.mark.parametrize(
     'allowed_hosts, tls, check_client_cert, context, windows, filtering, exception, logexp',
     [
         pytest.param(
-            None,
-            False,
-            False,
-            None,
-            False,
-            True,
-            None,
+            None, False, False, None, False, True, None,
             ["'allowed_hosts' is currently null, which blocks any host from connecting"],
             id="allowed_hosts_not_configured",
         ),
         pytest.param(
-            [],
-            False,
-            None,
-            False,
-            False,
-            False,
-            None,
+            [], False, None, False, False, False, None,
             ['NRPE server allows connections from any host. This is not recommended'],
             id="filtering_disabled",
         ),
         pytest.param(
-            ['ok-host'],
-            False,
-            False,
-            None,
-            False,
-            True,
-            None,
+            ['ok-host'], False, False, None, False, True, None,
             ['NRPE server allows connections from: ok-host'],
             id="filtering_one_host_no_tls_no_check_client_cert",
         ),
         pytest.param(
-            ['ok-host', '10.0.1.42', 'opsview.com'],
-            False,
-            False,
-            None,
-            False,
-            True,
-            None,
+            ['ok-host', '10.0.1.42', 'opsview.com'], False, False, None, False, True, None,
             [],
             id="filtering_many_hosts_no_tls_no_check_client_cert",
         ),
         pytest.param(
-            ['ok-host'],
-            False,
-            True,
-            None,
-            False,
-            True,
-            None,
+            ['ok-host'], False, True, None, False, True, None,
             ['NRPE server allows connections from: ok-host'],
             id="filtering_one_host_no_tls_yes_check_client_cert",
         ),
         pytest.param(
-            ['ok-host', '10.0.1.42', 'opsview.com'],
-            False,
-            True,
-            None,
-            False,
-            True,
-            None,
+            ['ok-host', '10.0.1.42', 'opsview.com'], False, True, None, False, True, None,
             [],
             id="filtering_many_hosts_no_tls_yes_check_client_cert",
         ),
         pytest.param(
-            ['ok-host'],
-            True,
-            True,
-            None,
-            False,
-            True,
-            None,
-            [
-                'NRPE server allows connections from: ok-host',
-            ],
+            ['ok-host'], True, True, None, False, True, None,
+            ['NRPE server allows connections from: ok-host'],
             id="filtering_one_host_yes_tls_yes_check_client_cert",
         ),
         pytest.param(
-            ['ok-host', '10.0.1.42', '10.0.1.43', 'opsview.com'],
-            True,
-            True,
-            None,
-            False,
-            True,
-            None,
+            ['ok-host', '10.0.1.42', '10.0.1.43', 'opsview.com'], True, True, None, False, True, None,
             ["'check_client_cert' is enabled. Any IP addresses configured in 'allowed_hosts' will be ignored."],
             id="filtering_many_hosts_yes_tls_yes_check_client_cert",
         ),
         pytest.param(
-            [],
-            False,
-            False,
-            None,
-            False,
-            False,
-            None,
+            [], False, False, None, False, False, None,
             ['NRPE server running with TLS disabled. This is not recommended'],
             id="no_tls",
         ),
         pytest.param([], True, False, [mock.Mock()], False, False, None, ['with TLS'], id="tls_linux"),
         pytest.param([], True, False, [mock.Mock()], True, False, None, ['with TLS'], id="tls_windows"),
         pytest.param(
-            [],
-            True,
-            False,
-            False,
-            True,
-            False,
-            Exception,
+            [], True, False, False, True, False, Exception,
             ['with TLS', 'Error setting up SSL Context'],
             id="context_error",
+        ),
+        pytest.param(
+            [
+                'this.is.a.very.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.actually.works.as'
+                '.expected.I.think.Im.going.to.need.to.repeat.this.as.it.is.not.long.enough.even.now.this.is.a.very'
+                '.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.works'
+            ],
+            True, False, None, True, True, None,
+            [],
+            id="very_long_allowed_host_name",
         ),
     ],
 )
 def test_nrpe_server_post_init(
-    allowed_hosts,
-    tls,
-    check_client_cert,
-    context,
-    windows,
-    filtering,
-    exception,
-    logexp,
-    mocker,
-    server,
-    platform_win,
-    caplog,
+        allowed_hosts, tls, check_client_cert, context, windows, filtering, exception,
+        logexp, mocker, server, platform_win, caplog,
 ):
     server.server_config.allowed_hosts = allowed_hosts
     server.server_config.tls_enabled = tls
@@ -178,75 +176,114 @@ def test_nrpe_server_post_init(
         assert text in caplog.text
 
 
-@pytest.mark.parametrize(
-    'lock, accept_connection, spawn, exception, logexp',
-    [
-        pytest.param(
-            [False],
-            None,
-            None,
-            StopIteration,
-            [
-                'Starting NRPEListener.command_listener()',
-                'Failed to acquire lock',
-            ],
-            id="lock_fail",
-        ),
-        pytest.param(
-            [False, False, False],
-            None,
-            None,
-            None,
-            [
-                'Starting NRPEListener.command_listener()',
-                'Failed to acquire lock',
-            ],
-            id="server_stopped",
-        ),
-        pytest.param(
-            [True],
-            (None, None),
-            None,
-            StopIteration,
-            [
-                'Starting NRPEListener.command_listener()',
-                'Releasing lock (connection rejected)',
-            ],
-            id="connection_rejected",
-        ),
-        pytest.param(
-            [True],
-            (mock.Mock(), 'host'),
-            Exception('bar'),
-            Exception,
-            [
-                'Starting NRPEListener.command_listener()',
-                'Error while spawning command: bar',
-            ],
-            id="spawn_error",
-        ),
-        pytest.param(
-            [True],
-            (mock.Mock(), 'host'),
-            None,
-            StopIteration,
-            [
-                'Starting NRPEListener.command_listener()',
-            ],
-            id="success",
-        ),
-        pytest.param(
-            [True],
-            (mock.Mock(getpeername=mock.Mock(side_effect=OSError)), ''),
-            None,
-            StopIteration,
-            [
-                'Invalid peer connection',
-            ],
-            id="invalid_peer",
-        ),
-    ],
-)
+@pytest.mark.parametrize('tls, check_cert, allowed_hosts, getaddr, expected, logexp', [
+    pytest.param(False, False, [], None, {}, '', id="no_allowed_hosts"),
+    pytest.param(True, True, [], None, {}, '', id="no_allowed_hosts"),
+    pytest.param(True, True, ['host.foo'], socket.gaierror, {'host.foo': []}, '', id="addr_lookup_fail"),
+    pytest.param(
+        True, True, ['opsera.com'], [[
+            (2, 1, 6, '', ('23.253.127.84', 0)),
+            (2, 2, 17, '', ('23.253.127.84', 0)),
+            (2, 3, 0, '', ('23.253.127.84', 0))]],
+        {'opsera.com': ['23.253.127.84']},
+        'NRPE server allows connections from: opsera.com',
+        id="many_duplicate_ips"),
+    pytest.param(
+        True, True, ['opsera.com'], [[
+            (2, 1, 6, '', ('23.253.127.84', 0)),
+            (2, 2, 17, '', ('23.253.127.85', 0)),
+            (2, 3, 0, '', ('23.253.127.84', 0))]],
+        {'opsera.com': ['23.253.127.84', '23.253.127.85']},
+        'NRPE server allows connections from: opsera.com',
+        id="some_duplicate_ips"),
+    pytest.param(
+        True, True, ['opsera.com', '1.2.3.4'], [[
+            (2, 1, 6, '', ('23.253.127.84', 0)),
+            (2, 2, 17, '', ('23.253.127.85', 0)),
+            (2, 3, 0, '', ('23.253.127.84', 0))]],
+        {'opsera.com': ['23.253.127.84', '23.253.127.85']},
+        [
+            "Ignoring '1.2.3.4' from allowed_hosts",
+            'NRPE server allows connections from: opsera.com',
+            "Any IP addresses configured in 'allowed_hosts' will be ignored.",
+        ],
+        id="IPs_in_allowed_hosts_ignored"),
+    pytest.param(
+        True, False, ['opsera.com', '1.2.3.4'], [[
+            (2, 1, 6, '', ('23.253.127.84', 0)),
+            (2, 2, 17, '', ('23.253.127.85', 0)),
+            (2, 3, 0, '', ('23.253.127.84', 0))]],
+        {'opsera.com': ['23.253.127.84', '23.253.127.85'], '1.2.3.4': ['1.2.3.4']},
+        [
+            'NRPE server allows connections from: opsera.com',
+            'NRPE server allows connections from: 1.2.3.4',
+        ],
+        id="IPs_in_allowed_hosts_allowed"),
+])
+def test_nrpe_server_initialise_allowed_hosts(
+        tls, check_cert, allowed_hosts, getaddr,
+        expected, logexp,
+        mocker, server, caplog,
+):
+    server.server_config.tls_enabled = tls
+    server.server_config.tls.check_client_cert = check_cert
+    server.server_config.allowed_hosts = allowed_hosts
+    mocker.patch('nrpe.server.socket.getaddrinfo', side_effect=getaddr)
+    server._initialise_allowed_hosts()
+    assert len(server._allowed_hosts) == len(expected)
+    for key, value in expected.items():
+        assert key in server._allowed_hosts
+        server._allowed_hosts[key].sort()
+        assert server._allowed_hosts[key] == expected[key]
+    if isinstance(logexp, list):
+        for logentry in logexp:
+            assert logentry in caplog.text
+    else:
+        assert logexp in caplog.text
+
+
+@pytest.mark.parametrize('lock, accept_connection, spawn, exception, logexp', [
+    pytest.param(
+        [False], None, None, StopIteration,
+        [
+            'Starting NRPEListener.command_listener()',
+            'Failed to acquire lock',
+        ],
+        id="lock_fail"),
+    pytest.param(
+        [False, False, False], None, None, None,
+        [
+            'Starting NRPEListener.command_listener()',
+            'Failed to acquire lock',
+        ],
+        id="server_stopped"),
+    pytest.param(
+        [True], (None, None), None, StopIteration,
+        [
+            'Starting NRPEListener.command_listener()',
+            'Releasing lock (connection rejected)',
+        ],
+        id="connection_rejected"),
+    pytest.param(
+        [True], (mock.Mock(), 'host'), Exception('bar'), Exception,
+        [
+            'Starting NRPEListener.command_listener()',
+            'Error while spawning command: bar',
+        ],
+        id="spawn_error"),
+    pytest.param(
+        [True], (mock.Mock(), 'host'), None, StopIteration,
+        [
+            'Starting NRPEListener.command_listener()',
+        ],
+        id="success"),
+    pytest.param(
+        [True], (mock.Mock(getpeername=mock.Mock(side_effect=OSError)), ''), None, StopIteration,
+        [
+            'Invalid peer connection',
+        ],
+        id="invalid_peer"),
+])
 def test_nrpe_server_command_listener(lock, accept_connection, spawn, exception, logexp, mocker, server, caplog):
     server.is_running = mocker.Mock(side_effect=[True, True, False])
     server._lock.acquire = mocker.Mock(side_effect=lock + [StopIteration])
@@ -272,78 +309,34 @@ def test_nrpe_server_force_close_active_connections(mocker, server, caplog):
 
 
 @pytest.mark.parametrize(
-    'tls, accept, wrap, cert, hostfilter, allowed_hosts, expected, logexp',
+    'tls, accept, wrap, cert, hostfilter, check_client_cert, allowed_hosts, expected, logexp',
     [
         pytest.param(
-            True,
-            ssl.SSLError,
-            None,
-            None,
-            None,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                'SSL Handshake error',
-            ],
-            id="ssl_error",
-        ),
+            True, ssl.SSLError, None, None, None, None, {'knownhost.foo': []},
+            (None, None), ['SSL Handshake error'],
+            id="ssl_error"),
         pytest.param(
-            True,
-            socket.error,
-            None,
-            None,
-            None,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                'Socket error',
-            ],
-            id="socket_error",
-        ),
+            True, socket.error, None, None, None, None, {'knownhost.foo': []},
+            (None, None), ['Socket error'],
+            id="socket_error"),
         pytest.param(
-            True,
-            socket.gaierror,
-            None,
-            None,
-            None,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                'Socket error',
-            ],
-            id="socket_gaierror",
-        ),
+            True, socket.gaierror, None, None, None, None, {'knownhost.foo': []},
+            (None, None), ['Socket error'],
+            id="socket_gaierror"),
         pytest.param(
-            True,
-            ('knownhost', 42),
-            SocketTimeout,
-            None,
-            None,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                'SSL Handshake timeout',
-            ],
-            id="ssl_handshake_timeout",
-        ),
+            True, ('knownhost', 42), SocketTimeout, None, None, None, {'knownhost.foo': []},
+            (None, None), ['SSL Handshake timeout'],
+            id="ssl_handshake_timeout"),
         pytest.param(
-            False,
-            ('knownhost.foo', 42),
-            None,
-            None,
-            True,
-            ['knownhost.foo'],
+            False, ('knownhost.foo', 42), None, None, True, False, {'knownhost.foo': []},
             (True, 'knownhost.foo'),
             [
                 "Host 'knownhost.foo' allowed",
                 "Connection accepted from: 'knownhost.foo'",
             ],
-            id="success_no_tls",
-        ),
+            id="success_no_tls"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
+            True, ('knownhost.foo', 42), None,
             {
                 'subject': [
                     (('commonName', 'known.foo'),),
@@ -354,321 +347,171 @@ def test_nrpe_server_force_close_active_connections(mocker, server, caplog):
                     ),
                 ]
             },
-            True,
-            ['knownhost.foo'],
+            True, False, {'knownhost.foo': []},
             (True, 'known.foo'),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
-                "Host 'knownhost.foo' allowed",
-                "Connection accepted from: 'known.foo'",
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
+                "Host 'knownhost.foo' allowed", "Connection accepted from: 'known.foo'",
             ],
-            id="success_tls",
-        ),
+            id="success_tls"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'subjectAltName': (('DNS', '*.*.foo'),)},
-            True,
-            None,
-            (None, None),
+            True, ('knownhost.foo', 42), None,
+            {
+                'subject': [
+                    (('commonName', 'opsview@known.foo'),),
+                    (
+                        ('foo', 'bar'),
+                        ('commonName', 'opsview@knownhost.foo'),
+                        ('foo', 'bar'),
+                    ),
+                ]
+            },
+            True, False, {'opsview@knownhost.foo': []},
+            (True, 'opsview@known.foo'),
             [
-                "Connection rejected: host 'knownhost.foo', as currently blocking all hosts",
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
+                "Host 'opsview@knownhost.foo' allowed", "Connection accepted from: 'opsview@known.foo'",
             ],
-            id="block_all_hosts",
-        ),
+            id="success_tls_not_a_hostname"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
+            True, ('knownhost.foo', 42), None, {'subjectAltName': (('DNS', '*.*.foo'),)}, True, False, None,
+            (None, None), ["Connection rejected: host 'knownhost.foo', as currently blocking all hosts"],
+            id="block_all_hosts"),
+        pytest.param(
+            True, ('knownhost.foo', 42), None,
             {'subjectAltName': (('DNS', ''), ('DNS', '*.foo'), ('IP Address', '192.168.0.1'))},
-            True,
-            ['knownhost.foo'],
+            True, False, {'knownhost.foo': []},
             (True, ', *.foo'),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
-                "Host 'knownhost.foo' allowed",
-                "Connection accepted from: ', *.foo'",
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
+                "Host 'knownhost.foo' allowed", "Connection accepted from: ', *.foo'",
             ],
-            id="success_tls_wildcard",
-        ),
+            id="success_tls_wildcard"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'subjectAltName': (('DNS', '*.*.foo'),)},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                "Connection rejected: host '*.*.foo' is not in allowed_hosts",
-            ],
-            id="fail_tls_wildcard_too_many",
-        ),
+            True, ('knownhost.foo', 42), None, {'subjectAltName': (('DNS', '*.*.foo'),)}, True, False,
+            {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host '*.*.foo' is not in allowed_hosts"],
+            id="fail_tls_wildcard_too_many"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'subjectAltName': (('DNS', 'bar.*.foo'),)},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                "Connection rejected: host 'bar.*.foo' is not in allowed_hosts",
-            ],
-            id="fail_tls_wildcard_not_start",
-        ),
+            True, ('knownhost.foo', 42), None, {'subjectAltName': (('DNS', 'bar.*.foo'),)}, True, True,
+            {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host 'bar.*.foo' is not in allowed_hosts"],
+            id="fail_tls_wildcard_not_start"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'subjectAltName': (('DNS', '*'),)},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                "Connection rejected: host '*' is not in allowed_hosts",
-            ],
-            id="fail_tls_wildcard_no_sep",
-        ),
+            True, ('knownhost.foo', 42), None, {'subjectAltName': (('DNS', '*'),)}, True, False, {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host '*' is not in allowed_hosts"],
+            id="fail_tls_wildcard_no_sep"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'subjectAltName': (('DNS', 'bad*.foo'),)},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                "Connection rejected: host 'bad*.foo' is not in allowed_hosts",
-            ],
-            id="fail_tls_wildcard_bad",
-        ),
+            True, ('knownhost.foo', 42), None, {'subjectAltName': (('DNS', 'bad*.foo'),)}, True, False,
+            {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host 'bad*.foo' is not in allowed_hosts"],
+            id="fail_tls_wildcard_bad"),
         pytest.param(
-            True,
-            ('.foo', 42),
-            None,
-            {'subjectAltName': (('foo', 'bar'), ('DNS', '*.foo'))},
-            True,
-            ['.foo'],
-            (None, None),
-            [
-                "Connection rejected: host '*.foo' is not in allowed_hosts",
-            ],
-            id="fail_tls_wildcard_bad_hostname",
-        ),
-        pytest.param(
-            True,
-            ('192.168.0.1', 42),
-            None,
+            True, ('192.168.0.1', 42), None,
             {'subjectAltName': (('IP Address', 'f800::1'), ('IP Address', '192.168.0.1'), ('DNS', 'knownhost.foo'))},
-            True,
-            ['192.168.0.1'],
+            True, True, {'another.name': ['192.168.0.1']},
             (True, 'knownhost.foo', [socket.gaierror], ['192.168.0.1']),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
-                "Host '192.168.0.1' allowed",
-                "Connection accepted from: 'knownhost.foo'",
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
+                "Host 'another.name' allowed", "Connection accepted from: 'knownhost.foo'",
             ],
-            id="success_tls_ip",
-        ),
+            id="success_tls_ip"),
         pytest.param(
-            True,
-            ('192.168.0.1', 42),
-            None,
+            True, ('192.168.0.1', 42), None,
             {'subjectAltName': (('IP Address', 'f800::1'), ('IP Address', '192.168.0.2'), ('DNS', 'knownhost.foo'))},
-            True,
-            ['192.168.0.1'],
+            True, False, {'192.168.0.1': ['192.168.0.1']},
             (None, None, [socket.gaierror], ['192.168.0.1']),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection rejected: host 'knownhost.foo' is not in allowed_hosts"
             ],
-            id="fail_tls_ip",
-        ),
+            id="fail_tls_ip"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            {'empty': ()},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                "Connection rejected: host '' is not in allowed_hosts",
-            ],
-            id="fail_empty_cert",
-        ),
+            True, ('knownhost.foo', 42), None, {'empty': ()}, True, False, {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host '' is not in allowed_hosts"],
+            id="fail_empty_cert"),
         pytest.param(
-            True,
-            ('knownhost.foo', 42),
-            None,
-            None,
-            True,
-            ['knownhost.foo'],
+            True, ('knownhost.foo', 42), None, None, True, False, {'knownhost.foo': []},
             (True, 'knownhost.foo'),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
-                "Host 'knownhost.foo' allowed",
-                "Connection accepted from: 'knownhost.foo'",
+                "Host 'knownhost.foo' allowed", "Connection accepted from: 'knownhost.foo'",
             ],
-            id="success_tls_no_certificate",
-        ),
+            id="success_tls_no_certificate"),
         pytest.param(
-            False,
-            ('unknown', 42),
-            None,
-            None,
-            True,
-            ['knownhost.foo'],
+            True, ('knownhost.foo', 42), None, None, True, True, {'knownhost.foo': []},
+            (None, None), ['Connection from knownhost.foo: no client certificate received'],
+            id="fail_tls_no_certificate_but_client_cert_reqd"),
+        pytest.param(
+            False, ('unknown', 42), None, None, True, False, {'knownhost.foo': []},
+            (None, None), ["Connection rejected: host 'unknown' is not in allowed_hosts"],
+            id="fail_host_filtering_no_tls"),
+        pytest.param(
+            True, ('unknown', 42), None, {'subject': ((('commonName', 'unknown.foo'),),)}, True, False,
+            {'knownhost.foo': []},
             (None, None),
             [
-                "Connection rejected: host 'unknown' is not in allowed_hosts",
-            ],
-            id="fail_host_filtering_no_tls",
-        ),
-        pytest.param(
-            True,
-            ('unknown', 42),
-            None,
-            {'subject': ((('commonName', 'unknown.foo'),),)},
-            True,
-            ['knownhost.foo'],
-            (None, None),
-            [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection rejected: host 'unknown.foo' is not in allowed_hosts",
             ],
-            id="fail_host_filtering_tls",
-        ),
+            id="fail_host_filtering_tls"),
         pytest.param(
-            True,
-            ('unknown', 42),
-            None,
+            True, ('unknown', 42), None,
             {'subject': ((('commonName', 'unknown.foo'),), (('commonName', 'foo.bar'),))},
-            True,
-            ['knownhost.foo'],
+            True, False, {'knownhost.foo': []},
             (None, None),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection rejected: host 'unknown.foo, foo.bar' is not in allowed_hosts",
             ],
-            id="fail_host_filtering_tls_multi",
-        ),
+            id="fail_host_filtering_tls_multi"),
         pytest.param(
-            False,
-            ('unknown', 42),
-            None,
-            None,
-            False,
-            ['knownhost.foo'],
-            (True, 'unknown'),
-            [
-                "Connection accepted from: 'unknown'",
-            ],
-            id="success_no_host_filtering_no_tls",
-        ),
+            False, ('unknown', 42), None, None, False, False, {'knownhost.foo': []},
+            (True, 'unknown'), ["Connection accepted from: 'unknown'"],
+            id="success_no_host_filtering_no_tls"),
         pytest.param(
-            True,
-            ('unknown', 42),
-            None,
-            {'subject': ((('commonName', 'unknown.foo'),),)},
-            False,
-            ['knownhost.foo'],
+            True, ('unknown', 42), None, {'subject': ((('commonName', 'unknown.foo'),),)}, False, False,
+            {'knownhost.foo': []},
             (True, 'unknown.foo'),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection accepted from: 'unknown.foo'",
             ],
-            id="success_no_host_filtering_tls",
-        ),
+            id="success_no_host_filtering_tls"),
         pytest.param(
-            True,
-            ('this', 42),
-            None,
+            True, ('this', 42), None,
             {'subjectAltName': (('IP Address', 'f800::1'), ('IP Address', '192.168.0.1'), ('DNS', 'knownhost.foo'))},
-            True,
-            [
-                'this.is.a.very.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.actually.works.as'
-                '.expected.I.think.Im.going.to.need.to.repeat.this.as.it.is.not.long.enough.even.now.this.is.a.very'
-                '.long.hostname.just.to.test.that.the.code.for.detecting.long.hostnames.works'
-            ],
+            True, False, {'this_is_invalid.foo': []},
             (None, None),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection rejected: host 'knownhost.foo' is not in allowed_hosts",
             ],
-            id="fail_long_hostname_tls",
-        ),
+            id="fail_invalid_hostname_tls"),
         pytest.param(
-            True,
-            ('this', 42),
-            None,
+            True, ('this', 42), None,
             {'subjectAltName': (('IP Address', 'f800::1'), ('IP Address', '192.168.0.1'), ('DNS', 'knownhost.foo'))},
-            True,
-            ['this_is_invalid.foo'],
+            True, False, {'this-is-invalid-.foo': []},
             (None, None),
             [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
+                'Client certificate: ', 'TLS version: ', 'Cipher: ',
                 "Connection rejected: host 'knownhost.foo' is not in allowed_hosts",
             ],
-            id="fail_invalid_hostname_tls",
-        ),
-        pytest.param(
-            True,
-            ('this', 42),
-            None,
-            {'subjectAltName': (('IP Address', 'f800::1'), ('IP Address', '192.168.0.1'), ('DNS', 'knownhost.foo'))},
-            True,
-            ['this-is-invalid-.foo'],
-            (None, None),
-            [
-                'Client certificate: ',
-                'TLS version: ',
-                'Cipher: ',
-                "Connection rejected: host 'knownhost.foo' is not in allowed_hosts",
-            ],
-            id="fail_dash_hostname_tls",
-        ),
+            id="fail_dash_hostname_tls"),
     ],
 )
 def test_nrpe_server_accept_connection(
-    tls, accept, wrap, cert, hostfilter, allowed_hosts, expected, logexp, mocker, server, caplog
+        tls, accept, wrap, cert, hostfilter, check_client_cert, allowed_hosts,
+        expected, logexp,
+        mocker, server, caplog,
 ):
-    if len(expected) == 2:
-        getaddrinfo = [socket.gaierror]
-        ip_address = [ValueError, ValueError]
-    else:
-        getaddrinfo = expected[2]
-        ip_address = expected[3]
-    mocker.patch('nrpe.server.socket.getaddrinfo', side_effect=getaddrinfo)
-    mocker.patch('nrpe.server.ipaddress.ip_address', side_effect=ip_address)
     mock_conn = mocker.Mock()
     server._socket.accept = mocker.Mock(side_effect=[(mock_conn, accept) if isinstance(accept, tuple) else accept])
     server._host_filtering = hostfilter
+    server.server_config.tls.check_client_cert = check_client_cert
     server._block_all_hosts = allowed_hosts is None
     if allowed_hosts:
-        server.server_config.allowed_hosts.extend(allowed_hosts)
+        server.server_config.allowed_hosts.extend([host for host in allowed_hosts.keys()])
+        server._allowed_hosts = allowed_hosts
     server.server_config.tls_enabled = tls
     if tls:
         server.context.wrap_socket.side_effect = [wrap or mock_conn]
@@ -690,7 +533,7 @@ def test_nrpe_server_accept_connection(
     ],
 )
 def test_nrpe_is_host_allowed_cert(cert, expected, mocker, server):
-    server.server_config.allowed_hosts.append('knownhost')
+    server._allowed_hosts['knownhost'] = []
     assert server.is_host_allowed_cert(cert) == expected
 
 

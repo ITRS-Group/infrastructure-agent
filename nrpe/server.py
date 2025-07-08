@@ -83,26 +83,13 @@ def match_hostname_with_wildcard(pattern: str, hostname: str) -> bool:
         return pattern == hostname
 
 
-def _match_hostname(cert: dict[str, Any], hostname: str) -> bool:
+def _match_hostname(cert: dict[str, Any], hostname: str, resolved_ips: list[str]) -> bool:
     """
     Verifies that the given hostname or IP address matches the certificate.
     replaces the deprecated match_hostname function from the ssl module.
     """
     # Check if the hostname is an IP address
-    try:
-        ipaddress.ip_address(hostname)
-        resolved_ips = [hostname]
-        is_ip = True
-    except ValueError:
-        if not is_valid_hostname(hostname):
-            return False
-        try:
-            # Use getaddrinfo to support both IPv4 and IPv6 resolution
-            addr_info = socket.getaddrinfo(hostname, None)
-            resolved_ips = [info[4][0] for info in addr_info]  # Extract resolved IPs
-        except OSError:
-            resolved_ips = []
-        is_ip = False
+    is_ip = ((len(resolved_ips) == 1) and (hostname == resolved_ips[0]))
 
     # Extract SANs from the certificate
     san = cert.get('subjectAltName', [])
@@ -140,29 +127,15 @@ class NRPEListener:
     def __post_init__(self):
         self._connected_sockets: dict[(str, int), (socket.socket, greenlet)] = {}
         self._host_filtering = True
+        self._allowed_hosts: dict[str, list[str]] = {}
 
         if self.server_config.allowed_hosts is None:
             # allowed_hosts must be explicitly configured to [] to disable host checks
             # a null value means that every host will be blocked
             logger.warning("'allowed_hosts' is currently null, which blocks any host from connecting.")
             self._block_all_hosts = True
-
         elif isinstance(self.server_config.allowed_hosts, list) and len(self.server_config.allowed_hosts):
-            logged_warning = False
-
-            for allowed_host in self.server_config.allowed_hosts:
-                logger.debug("NRPE server allows connections from: %s", allowed_host)
-                if self.server_config.tls_enabled and self.server_config.tls.check_client_cert:
-                    try:
-                        ipaddress.ip_address(allowed_host)
-                        if not logged_warning:
-                            logger.warning(
-                                "'check_client_cert' is enabled. "
-                                "Any IP addresses configured in 'allowed_hosts' will be ignored."
-                            )
-                            logged_warning = True
-                    except ValueError:
-                        pass
+            self._initialise_allowed_hosts()
         else:
             self._host_filtering = False
             logger.warning("NRPE server allows connections from any host. This is not recommended.")
@@ -209,6 +182,36 @@ class NRPEListener:
         # initialise cache for hostname lookups
         self._hostname_cache: dict[str, str] = {}
         spawn(self._gproxy, self.housekeeping, self.server_config.housekeeping_interval)
+
+    def _initialise_allowed_hosts(self):
+        """ Validate and prepare the list of allowed hosts """
+        no_ips = self.server_config.tls_enabled and self.server_config.tls.check_client_cert
+        for allowed_host in self.server_config.allowed_hosts:
+            try:
+                ipaddress.ip_address(allowed_host)
+                if no_ips:
+                    logger.debug("Ignoring '%s' from allowed_hosts", allowed_host)
+                    continue
+                self._allowed_hosts[allowed_host] = [allowed_host]
+            except ValueError:
+                # not an IP address
+                resolved_ips = []
+                if is_valid_hostname(allowed_host):
+                    try:
+                        # Use getaddrinfo to support both IPv4 and IPv6 resolution
+                        addr_info = socket.getaddrinfo(allowed_host, None)
+                        resolved_ips = list(set([info[4][0] for info in addr_info]))  # Extract resolved IPs
+                    except OSError:
+                        pass
+                self._allowed_hosts[allowed_host] = resolved_ips
+            logger.debug("NRPE server allows connections from: %s", allowed_host)
+
+        if len(self.server_config.allowed_hosts) > len(self._allowed_hosts):
+            # IPs in allowed hosts, but certificate checks are required
+            logger.warning(
+                "'check_client_cert' is enabled. "
+                "Any IP addresses configured in 'allowed_hosts' will be ignored."
+            )
 
     def _reset_connections(self):
         """Reset the accepted connections and connection lock"""
@@ -292,6 +295,8 @@ class NRPEListener:
                 client_cert = conn.getpeercert()
                 if client_cert:
                     host = self.get_certificate_names(client_cert)
+                elif self.server_config.tls.check_client_cert:
+                    return _reject_connection(conn, f"Connection from {host}: no client certificate received")
 
                 logger.debug("Client certificate: %s", client_cert)
                 logger.debug("TLS version: %s", conn.version())
@@ -318,8 +323,8 @@ class NRPEListener:
 
     def is_host_allowed_cert(self, client_cert: dict) -> Optional[str]:
         """Certificate host name validation against allowed_hosts list"""
-        for hostname in self.server_config.allowed_hosts:
-            if _match_hostname(client_cert, hostname):
+        for hostname, ips in self._allowed_hosts.items():
+            if _match_hostname(client_cert, hostname, ips):
                 logger.debug("Host '%s' allowed", hostname)
                 return hostname
         return None
