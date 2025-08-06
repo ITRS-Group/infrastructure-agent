@@ -34,6 +34,7 @@ server:
     cert_file:
     key_file:
     check_client_cert: False
+    check_server_cert: True
     cipher_suite: 'ECDH+AESGCM:ECDH+AES256:ECDH+AES128:!aNULL:!MD5:!DSS'
     context_options:
       - NO_SSLv3

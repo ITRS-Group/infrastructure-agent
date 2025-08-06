@@ -323,17 +323,20 @@ class CommandConfig(AbstractConfig):
 @dataclasses.dataclass
 class TLSConfig(AbstractConfig):
     """
-    Class to store configuration for a servers TLS.
+    Class to store TLS configuration.
     """
-    ca_cert: str
-    ca_path: str
-    cert_file: str
-    key_file: str
-    check_client_cert: str
-    cipher_suite: str
-    context_options: list[str]
+    ca_cert: Optional[str] = None
+    ca_path: Optional[str] = None
+    cert_file: Optional[str] = None
+    key_file: Optional[str] = None
+    check_client_cert: bool = True
+    check_server_cert: bool = True
+    cipher_suite: Optional[str] = None
+    context_options: list[str] = dataclasses.field(default_factory=list)
 
     log_all_messages: bool = read_bool_from_envar('AGENT_TLS_LOG_MESSAGES')
+
+    NAME: str = dataclasses.field(default='tls', repr=False)
 
 
 @dataclasses.dataclass
@@ -352,13 +355,13 @@ class CacheManagerConfig(AbstractConfig):
     max_cache_size: int
     max_item_size: int
     tls_enabled: bool = False
-    tls: TLSConfig = None
+    tls: Optional[TLSConfig] = None
 
     NAME: str = dataclasses.field(default='cachemanager', repr=False)
 
     def __post_init__(self):
-        self.max_cache_size: int = parse_byte_string(self.max_cache_size) or 107374182  # 1GB
-        self.max_item_size: int = parse_byte_string(self.max_item_size)
+        self.max_cache_size = parse_byte_string(self.max_cache_size) or 107374182  # 1GB
+        self.max_item_size = parse_byte_string(self.max_item_size)
         self.tls = TLSConfig.from_dict(self.tls) if self.tls_enabled else None
 
 
@@ -425,6 +428,49 @@ class EnvironmentVariableConfig(AbstractConfig):
 
 
 @dataclasses.dataclass
+class ForwarderClientConfig(AbstractConfig):
+    """
+    Class to store configuration for the ForwarderClient.
+    """
+    host: str
+    port: int
+    tls_enabled: bool
+    tls: Optional[TLSConfig] = None
+    concurrency: int = 0
+    connection_timeout: int = 30
+    network_timeout: int = 60
+    idle_timeout: int = 12
+    user: Optional[str] = None
+    password: Optional[str] = None
+
+    NAME: str = dataclasses.field(default='forwarder_client', repr=False)
+    MIN_IDLE_TIMEOUT_SECS = 4
+
+    def __post_init__(self):
+        self.tls = TLSConfig.from_dict(self.tls or {})
+        if self.idle_timeout < self.MIN_IDLE_TIMEOUT_SECS:
+            raise ConfigurationError(
+                f"Idle timeout for forwarder '{self.NAME}' must be at least {self.MIN_IDLE_TIMEOUT_SECS} seconds"
+            )
+
+
+@dataclasses.dataclass
+class ForwardersConfig(AbstractConfig):
+    """
+    Class to store configuration for the Forwarders.
+    """
+    forwarder_by_name: dict[str, ForwarderClientConfig] = dataclasses.field(default_factory=dict)
+
+    NAME: str = dataclasses.field(default='forwarders', repr=False)
+
+    @classmethod
+    def from_dict(cls, config: dict) -> ForwardersConfig:
+        return cls(forwarder_by_name={
+            name: ForwarderClientConfig.from_dict(fcc) for name, fcc in config.items()
+        })
+
+
+@dataclasses.dataclass
 class ServerConfig(AbstractConfig):
     """
     Class to store configuration for the Agents Server.
@@ -449,6 +495,38 @@ class ServerConfig(AbstractConfig):
 
 
 @dataclasses.dataclass
+class PollerScheduleConfig(AbstractConfig):
+    """
+    Class to store configuration for the Poller.
+    """
+    script: str
+    interval: int
+    forwarder: Optional[str] = None
+    hostname: Optional[str] = None
+    servicecheckname: Optional[str] = None
+
+    NAME: str = dataclasses.field(default='poller_schedule', repr=False)
+
+    @classmethod
+    def from_dict(cls, config: dict) -> dict[str, PollerScheduleConfig]:
+        pollers: dict[str, PollerScheduleConfig] = {}
+        for script, data in config.items():
+            if isinstance(data, dict):
+                # New style, with all attributes
+                pollers[script] = cls(
+                    script=script,
+                    interval=data['interval'],
+                    forwarder=data.get('forwarder'),
+                    hostname=data.get('hostname'),
+                    servicecheckname=data.get('servicecheckname')
+                )
+            else:
+                # Old style, just a poll interval
+                pollers[script] = cls(script=script, interval=data)
+        return pollers
+
+
+@dataclasses.dataclass
 class AgentConfig(AbstractConfig):
     """
     Class to store configuration for the entire Agent.
@@ -459,10 +537,13 @@ class AgentConfig(AbstractConfig):
     agent_name: str
     cachemanager: CacheManagerConfig = dataclasses.field(repr=False)
     commands: dict[str, CommandConfig] = dataclasses.field(repr=False)
+    case_sensitive_commands: bool
     execution: ExecutionConfig = dataclasses.field(repr=False)
     logging: dict = dataclasses.field(repr=False)
-    poller_schedule: dict[str, int] = dataclasses.field(repr=False)
+    poller_schedule: dict[str, PollerScheduleConfig] = dataclasses.field(repr=False)
+
     server: ServerConfig = dataclasses.field(repr=False)
+    forwarders: ForwardersConfig = dataclasses.field(repr=False)
     # A dictionary mapping runtime names (i.e. python) to the path the binary is stored in.
     # This is required on Windows to run non-executable files (python/perl scripts).
     windows_runtimes: dict[str, str] = dataclasses.field(repr=False)
@@ -475,21 +556,37 @@ class AgentConfig(AbstractConfig):
         """Build the agent configuration from a dict"""
         try:
             environment_variables = EnvironmentVariableConfig.from_dict(config['environment_variables'])
-            return cls(
+            commands = CommandConfig.from_dict(config['commands'], environment_variables)
+            case_sensitive_commands = has_command_case_conflicts(commands.keys())
+            if not case_sensitive_commands:
+                commands = {k.lower(): v for k, v in commands.items()}
+            agent_config: AgentConfig = cls(
                 agent_name=AGENT_NAME,
                 cachemanager=CacheManagerConfig.from_dict(config['cachemanager']),
-                commands=CommandConfig.from_dict(config['commands'], environment_variables),
+                commands=commands,
+                case_sensitive_commands=case_sensitive_commands,
                 execution=ExecutionConfig.from_dict(config['execution']),
                 logging=config['logging'],
-                poller_schedule=config['poller_schedule'],
+                poller_schedule=PollerScheduleConfig.from_dict(config['poller_schedule']),
                 server=ServerConfig.from_dict(config['server']),
+                forwarders=ForwardersConfig.from_dict(config.get('forwarders', {})),
                 version=config['version'],
                 windows_runtimes=config.get('windows_runtimes', {}),
                 environment_variables=environment_variables,
                 process_recycle_time=config['process_recycle_time'],
             )
+            return agent_config
         except KeyError as ex:
             raise ConfigurationError(f'Missing configuration section: {ex}')
+
+
+def has_command_case_conflicts(command_names: Iterable[str]) -> bool:
+    """
+    Check if there are any command names that are the same when case is ignored.
+    This is important for Windows where the file system is case insensitive.
+    """
+    item_list = list(command_names)
+    return len(set(i.lower() for i in item_list)) < len(item_list)
 
 
 def get_agent_root() -> Path:  # pragma: no cover

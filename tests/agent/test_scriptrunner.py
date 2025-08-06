@@ -28,6 +28,7 @@ def scriptrunner(agent_config, platform_linux, mocker) -> ScriptRunner:
     yield ScriptRunner(
         platform=platform_linux,
         command_config=agent_config.commands,
+        case_sensitive_commands=True,
         runtime_config=runtimes,
         execution_config=agent_config.execution,
         cache_manager=mocker.Mock(),
@@ -92,76 +93,54 @@ def test_scriptrunner_build_env(
 
 
 @pytest.mark.parametrize(
-    'script, arguments, runtime, is_windows, script_args, expected, logexp',
+    'script, arguments, runtime, is_windows, case_sensitive, script_args, expected, logexp',
     [
-        pytest.param('_NRPE_CHECK', [], None, False, None, (0, 'foo', '', False), [], id="success_without_args"),
-        pytest.param('command', [], None, False, ['/bin/cmd'], (42, '', '', False), [], id="success"),
+        pytest.param('_NRPE_CHECK', [], None, False, False, None, (0, 'foo', '', False), [], id="success_without_args"),
+        pytest.param('CoMmAnD', [], None, False, False, ['/bin/cmd'], (42, '', '', False), [], id="success"),
         pytest.param(
-            'command',
-            [],
-            'valid_runtime',
-            True,
-            ['valid_runtime', 'p1', '/bin/cmd'],
+            'CoMmAnD', [], None, False, True, None,
+            (3, "COMMAND UNKNOWN: Command 'CoMmAnD' not defined.", '', False),
+            ['WARNING ', "COMMAND UNKNOWN: 'CoMmAnD' requested but not configured"],
+            id="case_mismatch"),
+        pytest.param(
+            'command', [], 'valid_runtime', True, False, ['valid_runtime', 'p1', '/bin/cmd'],
             (42, '', '', False),
             [],
-            id="success_with_valid_runtime",
-        ),
+            id="success_with_valid_runtime"),
         pytest.param(
-            'command',
-            [],
-            'invalid_runtime',
-            True,
-            ['/bin/cmd'],
+            'command', [], 'invalid_runtime', True, False, ['/bin/cmd'],
             (42, '', '', False),
             ['WARNING', "Windows runtime 'invalid_runtime' could not be found"],
-            id="warning_with_invalid_runtime",
-        ),
+            id="warning_with_invalid_runtime"),
         pytest.param(
-            'command',
-            ['foo'],
-            None,
-            False,
-            ['/bin/cmd', 'bar', 'foo'],
+            'command', ['foo'], None, False, False, ['/bin/cmd', 'bar', 'foo'],
             (42, '', '', False),
             [],
             id="success_with_args"),
         pytest.param(
-            'unknown',
-            [],
-            None,
-            False,
-            None,
+            'unknown', [], None, False, False, None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
             ['WARNING ', "COMMAND UNKNOWN: 'unknown' requested but not configured"],
-            id="unknown_without_args",
-        ),
+            id="unknown_without_args"),
         pytest.param(
-            'unknown',
-            ['foo'],
-            None,
-            False,
-            None,
+            'unknown', ['foo'], None, False, False, None,
             (3, "COMMAND UNKNOWN: Command 'unknown' not defined.", '', False),
             ['WARNING ', "COMMAND UNKNOWN: 'unknown' requested but not configured"],
-            id="unknown_with_args",
-        ),
+            id="unknown_with_args"),
         pytest.param(
-            'command',
-            ['"path=C:\\Program Files\\Opsview Agent\\" filter+size=gt:1 MaxWarn=0 MaxCrit=1'],
-            None,
-            True,
-            None,
+            'command', ['"path=C:\\Program Files\\Opsview Agent\\" filter+size=gt:1 MaxWarn=0 MaxCrit=1'],
+            None, True, False, None,
             (3, "COMMAND FAILURE: Failed to parse command arguments.", '', False),
             ['WARNING', "COMMAND FAILURE: 'command' Failed to parse command arguments"],
-            id="unparsable_args",
-        ),
-    ],
-)
+            id="unparsable_args"),
+    ])
 def test_scriptrunner_run_script(
-    agent_config, script, arguments, runtime, is_windows, script_args, expected, logexp, scriptrunner, mocker, caplog
+        agent_config, script, arguments, runtime, is_windows, case_sensitive, script_args,
+        expected, logexp,
+        scriptrunner, mocker, caplog
 ):
-
     scriptrunner.platform_desc = 'foo'
+    scriptrunner.case_sensitive_commands = case_sensitive
     scriptrunner.command_config['command'] = CommandConfig(
         name='check_foo',
         runtime=runtime,
@@ -177,20 +156,66 @@ def test_scriptrunner_run_script(
     mock_proc = mocker.Mock(returncode=42)
     mock_proc.stdout.read.return_value = b''
     mock_proc.stderr.read.return_value = b''
-    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
-    mock_subp.Popen.return_value = mock_proc
+    mock_popen = mocker.patch(PATCH_PREFIX + 'Popen')
+    mock_popen.return_value = mock_proc
+
     assert scriptrunner.run_script(script, arguments) == expected
     if script_args:
-        first_arg = mock_subp.Popen.call_args[0][0]
+        first_arg = mock_popen.call_args[0][0]
         assert first_arg == script_args
     else:
-        mock_subp.Popen.assert_not_called()
+        mock_popen.assert_not_called()
     if logexp:
         for text in logexp:
             assert text in caplog.text
     else:
         for text in ('WARNING', 'ERROR'):
             assert text not in caplog.text
+
+
+@pytest.mark.parametrize('running', [
+    pytest.param([], id="no_runners"),
+    pytest.param(['foo'], id="running"),
+])
+def test_scriptrunner_kill_running(running, scriptrunner, mocker):
+    scriptrunner._running_processes = running
+    mocker.patch(PATCH_PREFIX + 'gevent')
+    scriptrunner.kill_running()
+
+
+@pytest.mark.parametrize('proc, poll, wait, is_windows, expected, logexp', [
+    pytest.param(False, None, [None], None, False, [], id="no_proc"),
+    pytest.param(True, [0], [None], None, False, [], id="proc_not_running"),
+    pytest.param(True, [None, 0], [None], None, False, ["Terminating process 'foo' (pid=42)"], id="proc_stopped"),
+    pytest.param(
+        True, [None, None], [None], False,
+        True, ["Terminating process 'foo' (pid=42)", "Killing process 'foo' (pid=42)"],
+        id="proc_killed_not_windows"),
+    pytest.param(
+        True, [None, None], [None], True,
+        True, ["Terminating process 'foo' (pid=42)", "Killing process 'foo' (pid=42)"],
+        id="proc_killed_windows"),
+    pytest.param(
+        True, [None, None], [TimeoutExpired('foo', 321)], True,
+        True, ["Terminating process 'foo' (pid=42)", "Killing process 'foo' (pid=42)"],
+        id="proc_killed_timeout_expired"),
+])
+def test_scriptrunner_terminate_process(proc, poll, wait, is_windows, expected, logexp, scriptrunner, caplog, mocker):
+    if proc:
+        mock_proc = mocker.Mock()
+        mock_proc.poll.side_effect = poll
+        mock_proc.wait.side_effect = wait
+        mock_proc.pid = 42
+    else:
+        mock_proc = None
+    scriptrunner.platform = mocker.Mock(is_windows=is_windows)
+    mocker.patch(PATCH_PREFIX + 'os.kill')
+    mocker.patch(PATCH_PREFIX + 'os.killpg')
+    mocker.patch(PATCH_PREFIX + 'os.getpgid', return_value=99)
+    mocker.patch(PATCH_PREFIX + 'signal', CTRL_C_EVENT=135)
+    assert scriptrunner._terminate_process(mock_proc, 'foo') == expected
+    for entry in logexp:
+        assert entry in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -242,7 +267,7 @@ def test_scriptrunner_long_running(
         scriptrunner.process_manager.get_managed_process.return_value = (mock_process, mocker.Mock())
         mock_process.stdout.readline.return_value = output_json
     else:
-        mocker.patch(PATCH_PREFIX + 'subprocess.Popen', return_value=mock_process)
+        mocker.patch(PATCH_PREFIX + 'Popen', return_value=mock_process)
         mock_process.stdout.read.side_effect = WaitAfterFirstCall(output_json).side_effect
         mock_process.stderr.read.side_effect = WaitAfterFirstCall(None).side_effect
 
@@ -330,10 +355,9 @@ def test_scriptrunner_run_script_with_poller(
         scriptrunner.set_poller_env_callback(poller_fn)
     mock_proc = mocker.Mock(returncode=0)
     mock_proc.communicate.return_value = (b'', b'')
-    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
-    mock_subp.Popen.return_value = mock_proc
+    mock_popen = mocker.patch(PATCH_PREFIX + 'Popen', return_value=mock_proc)
     scriptrunner.run_script(script_name, [], poller_env=poller_env)
-    mock_subp.Popen.assert_called_with(
+    mock_popen.assert_called_with(
         mocker.ANY,
         env=expected_env,
         stdin=mocker.ANY,
@@ -425,9 +449,7 @@ def test_scriptrunner_execute(
     mock_proc.pid = 707
     mock_proc.returncode = 42
 
-    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
-    mock_subp.Popen.return_value = mock_proc
-
+    mocker.patch(PATCH_PREFIX + 'Popen', return_value=mock_proc)
     assert scriptrunner._execute('command', command_config, ['/bin/cmd', 'arg1'], {}) == expected
 
     if isinstance(comm, TimeoutExpired) and not poll:
@@ -444,12 +466,9 @@ def test_scriptrunner_execute(
 
 def test_scriptrunner_execute_file_not_found(mocker, scriptrunner, caplog):
     cmd_path = '/somewhere/not-found'
-
-    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
-
     exc = FileNotFoundError()
     exc.filename = cmd_path
-    mock_subp.Popen.side_effect = exc
+    mocker.patch(PATCH_PREFIX + 'Popen', side_effect=exc)
 
     cmd_config = CommandConfig(
         name='check_foo', runtime=None, cache_manager=False, path='/path', stderr=False, long_running_key=None
@@ -479,10 +498,11 @@ def test_scriptrunner_stdin_pipe(agent_config, mocker, scriptrunner, execution_s
         execution_style=execution_style,
         environment_variables=agent_config.environment_variables
     )
-    mock_subp = mocker.patch(PATCH_PREFIX + 'subprocess')
-    mock_subp.Popen.return_value = mocker.Mock()
+
+    mock_popen = mocker.patch(PATCH_PREFIX + 'Popen')
+    mock_popen.return_value = mocker.Mock()
     scriptrunner.run_script(command, ['arg1'])
-    mock_subp.Popen.assert_called_with(
+    mock_popen.assert_called_with(
         mocker.ANY, env=mocker.ANY, stdin=expected_stdin, stdout=-1, stderr=-1, shell=False, preexec_fn=mocker.ANY
     )
 

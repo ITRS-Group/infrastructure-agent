@@ -20,6 +20,8 @@ from agent.config import (
     EnvironmentVariableConfig,
     ExecutionConfig,
     ExecutionStyle,
+    ForwarderClientConfig,
+    PollerScheduleConfig,
     create_default_user_config_if_required,
     get_config,
     get_startup_log_path,
@@ -435,13 +437,115 @@ def test_commandconfig_arg_parsing(path, expected_parsed_path, expected_max_uniq
             {}, "Missing configuration section: 'environment_variables'", ConfigurationError,
             id="missing-environment_variables"),
         pytest.param(
-            {'environment_variables': {}}, "Missing configuration section: 'cachemanager'", ConfigurationError,
+            {'environment_variables': {}}, "Missing configuration section: 'commands'", ConfigurationError,
             id="missing-cachemanager"),
+        pytest.param(
+            {'commands': {}, 'environment_variables': {}},
+            "Missing configuration section: 'cachemanager'", ConfigurationError,
+            id="missing-cachemanager"),
+        pytest.param(
+            {
+                'commands': {},
+                'environment_variables': {},
+                'cachemanager': {
+                    'host': 'foo.com', 'port': 12345, 'housekeeping_interval': 42, 'timestamp_error_margin': 99,
+                    'max_cache_size': 2112, 'max_item_size': '123B',
+                },
+                'execution': {'execution_timeout': 42},
+                'logging': {},
+                'poller_schedule': {},
+                'server': {
+                    'allowed_hosts': [], 'max_queued_connections': 10, 'max_active_connections': 12, 'port': 9876,
+                    'tls_enabled': False, 'tls_handshake_timeout': 60, 'tls': {}, 'max_request_time': 99,
+                    'receive_data_timeout': 30, 'housekeeping_interval': 1800, 'allow_multi_packet_response': True,
+                },
+                'forwarders': {},
+                'version': 99,
+                'windows_run_times': {},
+                'process_recycle_time': {},
+            },
+            '', None,
+            id="success"),
+        pytest.param(
+            {
+                'commands': {
+                    'fee': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                    'fie': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                    'foo': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                },
+                'environment_variables': {},
+                'cachemanager': {
+                    'host': 'foo.com', 'port': 12345, 'housekeeping_interval': 42, 'timestamp_error_margin': 99,
+                    'max_cache_size': 2112, 'max_item_size': '123B',
+                },
+                'execution': {'execution_timeout': 42},
+                'logging': {},
+                'poller_schedule': {},
+                'server': {
+                    'allowed_hosts': [], 'max_queued_connections': 10, 'max_active_connections': 12, 'port': 9876,
+                    'tls_enabled': False, 'tls_handshake_timeout': 60, 'tls': {}, 'max_request_time': 99,
+                    'receive_data_timeout': 30, 'housekeeping_interval': 1800, 'allow_multi_packet_response': True,
+                },
+                'forwarders': {},
+                'version': 99,
+                'windows_run_times': {},
+                'process_recycle_time': {},
+            },
+            '', None,
+            id="success_with_commands"),
+        pytest.param(
+            {
+                'commands': {
+                    'fee': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                    'feE': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                    'FEe': {
+                        'path': 'P',
+                        'environment_variables': {'passthrough': ['A', 'B'], 'custom': {'C': 'D'}}
+                    },
+                },
+                'environment_variables': {},
+                'cachemanager': {
+                    'host': 'foo.com', 'port': 12345, 'housekeeping_interval': 42, 'timestamp_error_margin': 99,
+                    'max_cache_size': 2112, 'max_item_size': '123B',
+                },
+                'execution': {'execution_timeout': 42},
+                'logging': {},
+                'poller_schedule': {},
+                'server': {
+                    'allowed_hosts': [], 'max_queued_connections': 10, 'max_active_connections': 12, 'port': 9876,
+                    'tls_enabled': False, 'tls_handshake_timeout': 60, 'tls': {}, 'max_request_time': 99,
+                    'receive_data_timeout': 30, 'housekeeping_interval': 1800, 'allow_multi_packet_response': True,
+                },
+                'forwarders': {},
+                'version': 99,
+                'windows_run_times': {},
+                'process_recycle_time': {},
+            },
+            '', None,
+            id="success_with_case_sensitive_commands"),
     ])
 def test_agentconfig_from_dict(config_dict, expected, exception):
-    with pytest.raises(exception) as exp:
+    if exception:
+        with pytest.raises(exception) as exp:
+            AgentConfig.from_dict(config_dict)
+        assert expected in str(exp)
+    else:
         AgentConfig.from_dict(config_dict)
-    assert expected in str(exp)
 
 
 @pytest.mark.parametrize(
@@ -515,3 +619,38 @@ def test_environment_variable_config_validation(passthrough, custom, expected):
     with exception_context:
         cfg = EnvironmentVariableConfig(passthrough=passthrough, custom=custom)
         assert cfg == expected
+
+
+@pytest.mark.parametrize('idle_timeout, exception', [
+    pytest.param(ForwarderClientConfig.MIN_IDLE_TIMEOUT_SECS + 1, None, id="success"),
+    pytest.param(ForwarderClientConfig.MIN_IDLE_TIMEOUT_SECS, None, id="success"),
+    pytest.param(ForwarderClientConfig.MIN_IDLE_TIMEOUT_SECS - 1, ConfigurationError, id="failure"),
+])
+def test_forwarder_client_config(idle_timeout, exception):
+    if not exception:
+        ForwarderClientConfig(host='host', port=99, tls_enabled=False, idle_timeout=idle_timeout)
+    else:
+        with pytest.raises(exception):
+            ForwarderClientConfig(host='host', port=99, tls_enabled=False, idle_timeout=idle_timeout)
+
+
+@pytest.mark.parametrize('config, count', [
+    pytest.param({}, 0, id="no_items"),
+    pytest.param({'scriptfoo': 'data'}, 1, id="old_style"),
+    pytest.param(
+        {
+            'script1': {'interval': 2, 'forwarder': 'fwd', 'hostname': 'host', 'servicecheckname': 'scn'},
+            'script2': {'interval': 5},
+        },
+        2, id="many_items"),
+    pytest.param(
+        {
+            'script1': {'interval': 2, 'forwarder': 'fwd', 'hostname': 'host', 'servicecheckname': 'scn'},
+            'script2': {'interval': 5},
+            'scriptfoo': 'data',
+        },
+        3, id="mix_and_match"),
+])
+def test_poller_schedule_config(config, count):
+    psc = PollerScheduleConfig.from_dict(config)
+    assert len(psc) == count

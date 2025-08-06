@@ -5,6 +5,8 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 
 from __future__ import annotations
 
+import agent.patcher
+
 import logging
 import os
 import sys
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from agent.agent import Agent
     from agent.config import AgentConfig
 
+assert agent.patcher.patched
 
 logger: logging.Logger = None
 infrastructure_agent: Agent = None

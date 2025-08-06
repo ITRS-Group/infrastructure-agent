@@ -1,4 +1,4 @@
-# Infrastructure Agent Windows Plugins - Licensing
+# Infrastructure Agent - Licensing
 
 The ITRS Group Infrastructure Agent is provided under the BSD 3-Clause License.
 A copy of the License can be found in the 'licenses' subdirectory.

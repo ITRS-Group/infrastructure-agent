@@ -26,10 +26,6 @@ def agent(cache_manager, agent_config, process_manager) -> Agent:
     yield ag
 
 
-def test_agent_init(agent):
-    assert not agent._running
-
-
 def test_agent_run(agent, mocker):
     mock_gevent = mocker.patch('agent.agent.gevent')
     mock_nrpe = mocker.patch('agent.agent.NRPEListener')
@@ -38,26 +34,31 @@ def test_agent_run(agent, mocker):
     assert mock_gevent.joinall.called
 
 
-@pytest.mark.parametrize(
-    'error', [
-        pytest.param(False, id="success"),
-        pytest.param(True, id="error"),
-    ])
-def test_agent_stop(error, agent, mocker):
-    mock_gevent = mocker.patch('agent.agent.gevent')
+@pytest.mark.parametrize('poller, process_manager, script_runner, error', [
+    pytest.param(True, True, True, False, id="success_stop_all"),
+    pytest.param(True, False, False, False, id="success_stop_poller"),
+    pytest.param(False, True, False, False, id="success_stop_process_manager"),
+    pytest.param(False, False, True, False, id="success_stop_script_runner"),
+    pytest.param(False, False, False, False, id="success_stop_none"),
+    pytest.param(True, True, True, True, id="error_stop_all"),
+    pytest.param(True, False, False, True, id="error_stop_poller"),
+    pytest.param(False, True, False, True, id="error_stop_process_manager"),
+    pytest.param(False, False, True, True, id="error_stop_script_runner"),
+    pytest.param(False, False, False, True, id="error_stop_none"),
+])
+def test_agent_stop(poller, process_manager, script_runner, error, agent, mocker):
+    mocker.patch('agent.agent.gevent')
+    if not poller:
+        agent._poller = None
+    if not process_manager:
+        agent._process_manager = None
+    if not script_runner:
+        agent._script_runner = None
     agent.stop(error)
     assert agent._terminated_with_error == error
-    assert mock_gevent.killall.called
-
-
-@pytest.mark.parametrize(
-    'running', [
-        pytest.param(False, id="stopped"),
-        pytest.param(True, id="running"),
-    ])
-def test_agent_is_running(running, agent):
-    agent._running = running
-    assert agent.is_running() == running
+    assert agent._poller is None
+    assert agent._process_manager is None
+    assert agent._script_runner is None
 
 
 @pytest.mark.parametrize(

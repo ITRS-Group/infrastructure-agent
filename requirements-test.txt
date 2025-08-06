@@ -5,6 +5,7 @@ coverage
 cryptography
 filelock
 gevent
+geventhttpclient
 mock
 pycryptodome
 pytest

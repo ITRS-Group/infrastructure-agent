@@ -15,9 +15,8 @@ import signal
 from typing import TYPE_CHECKING
 
 import gevent
-from gevent import subprocess
 from gevent.lock import BoundedSemaphore
-from gevent.subprocess import PIPE, TimeoutExpired
+from gevent.subprocess import Popen, PIPE, TimeoutExpired
 
 from .config import ExecutionStyle
 from .processmanager import ProcessManager
@@ -55,18 +54,22 @@ class ScriptRunner:
 
     cache_manager: CacheManager
     command_config: dict[str, CommandConfig]
+    case_sensitive_commands: bool
     execution_config: ExecutionConfig
     platform: Platform
-    cache_manager: CacheManager
     runtime_config: dict[str, list[str]]
     process_manager: ProcessManager
     platform_desc: str
+
+    _running_processes: set[Popen] = dataclasses.field(default_factory=set, init=False, repr=False)
 
     # The reference to the poller environment callback function (to prevent circular imports)
     _poller_env_fn: Callable[[str], dict[str, str]] = None
 
     EXIT_CODE_CRITICAL = ServiceReturnCodes.CRITICAL.value
     EXIT_CODE_UNKNOWN = ServiceReturnCodes.UNKNOWN.value
+
+    PROCESS_EXIT_SECS = 2
 
     def set_poller_env_callback(self, poller_env_fn: Callable[[str], dict[str, str]]):
         """Sets the poller environment callback function"""
@@ -83,8 +86,9 @@ class ScriptRunner:
             early_timeout = False
             return exit_code, response_stdout, response_stderr, early_timeout
 
+        command_key = command if self.case_sensitive_commands else command.lower()
         try:
-            command_config = self.command_config[command]
+            command_config = self.command_config[command_key]
         except KeyError:
             logger.warning("COMMAND UNKNOWN: '%s' requested but not configured", command)
             return ServiceReturnCodes.UNKNOWN.value, f"COMMAND UNKNOWN: Command '{command}' not defined.", "", False
@@ -103,8 +107,38 @@ class ScriptRunner:
             # Do not log the arguments since they may contain sensitive data.
             logger.warning("COMMAND FAILURE: '%s' Failed to parse command arguments", command)
             return ServiceReturnCodes.UNKNOWN.value, "COMMAND FAILURE: Failed to parse command arguments.", "", False
-
         return self._execute(command, command_config, args, kwargs)
+
+    def kill_running(self):
+        """Kill all running processes managed by this script runner"""
+        if self._running_processes:
+            logger.debug("Terminating all running commands managed by ScriptRunner: count=%d",
+                         len(self._running_processes))
+            greenlets = [gevent.spawn(self._terminate_process, proc) for proc in self._running_processes]
+            gevent.joinall(greenlets, raise_error=True)
+
+    def _terminate_process(self, proc: Popen, command_name: str = '') -> bool:
+        """Terminate a specific process"""
+        if not proc:
+            return False
+        killed = False
+        if proc.poll() is None:  # See if Process still running
+            logger.debug("Terminating process '%s' (pid=%d)", command_name, proc.pid)
+            proc.terminate()
+            try:
+                proc.wait(self.PROCESS_EXIT_SECS)  # Wait for the process to terminate
+            except TimeoutExpired:
+                pass
+            poll = proc.poll()
+            if poll is None:
+                # Kill it (SIGKILL or CTRL-C) and all its child processes
+                logger.warning("Killing process '%s' (pid=%d)", command_name, proc.pid)
+                if self.platform.is_windows:
+                    os.kill(proc.pid, signal.CTRL_C_EVENT)
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                killed = True
+        return killed
 
     def _setup_args(
         self, command: CommandConfig, script_args: list[str], poller_env: Optional[dict[str, str]] = None
@@ -163,21 +197,21 @@ class ScriptRunner:
                     proc, proc_lock = self.process_manager.get_managed_process(command.long_running_key, command_path)
                     env[ENV_LONG_RUNNING_PROCESS] = '1'
                 else:
-                    proc = subprocess.Popen(command_path, **kwargs)
+                    proc = Popen(command_path, **kwargs)
+                    self._running_processes.add(proc)
 
                 if len(args) > 1:
                     stdin_obj = {'cmd': args[1:], 'env': env}
                     stdin_data = json.dumps(stdin_obj).encode('utf-8')
             else:
                 # execution_style is ExecutionStyle.COMMAND_LINE_ARGS:
-                proc = subprocess.Popen(args, **kwargs)
+                proc = Popen(args, **kwargs)
+                self._running_processes.add(proc)
         except FileNotFoundError:
             logger.warning("COMMAND FAILURE: Command not found: '%s'", command_path)
             return (
                 ServiceReturnCodes.UNKNOWN.value,
                 f"COMMAND FAILURE: Command not found: '{command_path}'.", "", False)
-
-        pid = proc.pid
         max_wait_secs = self.execution_config.execution_timeout
         clean_stdout = ''
         clean_stderr: str
@@ -192,20 +226,9 @@ class ScriptRunner:
             clean_stderr = stderr if command.stderr else ''
             early_timeout = False
         except TimeoutExpired:
-            # Attempt to end the process gracefully (sending SIGTERM),
-            proc.terminate()
             command_name: str = args[0] if len(args) > 0 else ''
-            gevent.sleep(1)
-            add_text: str = ""
-            poll = proc.poll()
-            if poll is None:
-                # kill it (SIGKILL) and all its child processes
-                if self.platform.is_windows:
-                    # SIGKILL doesn't exist on Windows, send a CTRL_C_EVENT signal instead
-                    os.kill(pid, signal.CTRL_C_EVENT)
-                else:
-                    os.killpg(os.getpgid(pid), signal.SIGKILL)  # Kill the process group (all children)
-                add_text = " (and was killed)"
+            was_killed = self._terminate_process(proc, command_name)
+            add_text = " (and was killed)" if was_killed else ""
             logger.error("Process '%s' did not exit within %s seconds%s.", command_name, max_wait_secs, add_text)
             clean_stderr = f"ERROR: Command '{plugin}' did not exit within {max_wait_secs} seconds{add_text}."
             exit_code = self.EXIT_CODE_CRITICAL
@@ -213,12 +236,12 @@ class ScriptRunner:
         finally:
             if proc_lock:
                 proc_lock.release()
-
+        self._running_processes.discard(proc)
         del proc
         return exit_code, clean_stdout, clean_stderr, early_timeout
 
     def _read_output(
-        self, name: str, proc: subprocess.Popen, use_stdin: bool, long_running_key: str, timeout: int = 60
+        self, name: str, proc: Popen, use_stdin: bool, long_running_key: str, timeout: int = 60
     ) -> tuple[int, str, str]:
         timer = gevent.Timeout(timeout)
         stdout_buffer = bytearray()

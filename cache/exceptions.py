@@ -20,10 +20,6 @@ class ServerApiError(Exception):
         self.details = details
 
 
-class ConfigError(Exception):
-    pass
-
-
 class UnicodeKeyError(Exception):
     pass
 

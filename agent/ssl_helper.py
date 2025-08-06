@@ -38,16 +38,36 @@ class AgentSSLError(Exception):
     pass
 
 
-def get_ssl_context(tls_config: TLSConfig, name: str) -> ssl.SSLContext:
+def get_ssl_context(tls_config: TLSConfig, name: str, client_mode=False) -> ssl.SSLContext:
     """Validate the TLS configuration and set up the SSL context"""
     logger.debug("%s: Using OpenSSL version '%s'", name, ssl.OPENSSL_VERSION)
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT if client_mode else ssl.PROTOCOL_TLS_SERVER)
+    has_supplied_ca = bool(tls_config.ca_cert or tls_config.ca_path)
+    if client_mode:
+        if tls_config.check_server_cert:
+            logger.debug("%s: Check server certificate", name)
+            context.verify_mode = ssl.CERT_REQUIRED
+        else:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+    else:
+        if tls_config.check_client_cert:
+            logger.debug("%s: Check client certificate", name)
+            context.verify_mode = ssl.CERT_REQUIRED
+        else:
+            context.verify_mode = ssl.CERT_OPTIONAL
+        if not tls_config.cert_file:
+            if not tls_config.key_file and not has_supplied_ca:
+                tls_config.key_file, tls_config.cert_file = create_self_signed_cert(name, SELF_SIGNED_CERTIF_DIR)
+            else:
+                error = f"{name}: TLS config 'cert_file' not specified"
+                logger.error(error)
+                raise AgentSSLError(error)
 
     if tls_config.log_all_messages:
         logger.debug("%s: Logging all TLS messages", name)
         context._msg_callback = ssl_debug_message_callback
 
-    has_supplied_ca = (tls_config.ca_cert or tls_config.ca_path)
     if has_supplied_ca:
         logger.debug("%s: Using configured CA Certificate(s)", name)
         # check access - load_verify_locations() does not indicate which item failed
@@ -63,34 +83,21 @@ def get_ssl_context(tls_config: TLSConfig, name: str) -> ssl.SSLContext:
         logger.debug("%s: Loading system default CA certificates", name)
         context.load_default_certs(purpose=ssl.Purpose.CLIENT_AUTH)
 
-    if tls_config.check_client_cert:
-        logger.debug("%s: Check client certificate", name)
-        context.verify_mode = ssl.CERT_REQUIRED
-    else:
-        context.verify_mode = ssl.CERT_OPTIONAL
-
-    if not tls_config.cert_file:
-        if not tls_config.key_file and not has_supplied_ca:
-            tls_config.key_file, tls_config.cert_file = create_self_signed_cert(name, SELF_SIGNED_CERTIF_DIR)
-        else:
-            error = f"{name}: TLS config 'cert_file' not specified"
+    if tls_config.cert_file:
+        logger.debug("%s: Using configured TLS cert_file%s", name, " and key_file" if tls_config.key_file else "")
+        try:
+            # check access - load_cert_chain() does not indicate which item failed
+            check_file_access(tls_config.cert_file)
+            if tls_config.key_file:
+                check_file_access(tls_config.key_file)
+            context.load_cert_chain(tls_config.cert_file, tls_config.key_file)
+        except ssl.SSLError:
+            files = f"{tls_config.cert_file} {tls_config.key_file if tls_config.key_file else ''}"
+            error = f"{name}: TLS key missing or does not match the certificate: {files.strip()}"
             logger.error(error)
             raise AgentSSLError(error)
-
-    logger.debug("%s: Using configured TLS cert_file%s", name, " and key_file" if tls_config.key_file else "")
-    try:
-        # check access - load_cert_chain() does not indicate which item failed
-        check_file_access(tls_config.cert_file)
-        if tls_config.key_file:
-            check_file_access(tls_config.key_file)
-        context.load_cert_chain(tls_config.cert_file, tls_config.key_file)
-    except ssl.SSLError:
-        files = f"{tls_config.cert_file} {tls_config.key_file if tls_config.key_file else ''}"
-        error = f"{name}: TLS key missing or does not match the certificate: {files.strip()}"
-        logger.error(error)
-        raise AgentSSLError(error)
-    except Exception as ex:
-        raise AgentSSLError(f"{name}: {str(ex)}")
+        except Exception as ex:
+            raise AgentSSLError(f"{name}: {str(ex)}")
 
     if tls_config.cipher_suite:
         logger.debug("%s: Using configured TLS ciphers", name)

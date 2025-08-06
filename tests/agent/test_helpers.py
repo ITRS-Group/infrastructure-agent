@@ -5,7 +5,9 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 
 import pytest
 
-from agent.helpers import merge_dictionary, parse_byte_string, is_host_in_net_list
+from agent.helpers import merge_dictionary, parse_byte_string, is_host_in_net_list, basic_auth
+
+PATCH_PREFIX = 'agent.helpers.'
 
 
 @pytest.mark.parametrize(
@@ -68,3 +70,13 @@ def test_parse_byte_string(string: str, expected: int):
 ])
 def test_host_in_net_list(host, net_list, expected_result):
     assert is_host_in_net_list(host, net_list) == expected_result
+
+
+@pytest.mark.parametrize('encodebytes, expected, logexp', [
+    pytest.param([b'foo\n'], 'Basic foo', '', id="success"),
+    pytest.param(UnicodeDecodeError('fubar', b'2', 3, 4, '5'), 'Basic ', 'Failed to encode user/password', id="fail"),
+])
+def test_basic_auth(encodebytes, expected, logexp, mocker, caplog):
+    mocker.patch(PATCH_PREFIX + 'base64.encodebytes', side_effect=encodebytes)
+    assert basic_auth('user', 'password') == expected
+    assert logexp in caplog.text

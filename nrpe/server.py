@@ -277,7 +277,7 @@ class NRPEListener:
             return (None, None)
 
         conn: Union[socket.socket, SSLSocket] = None
-        client_cert: dict = None
+        client_cert: Optional[dict] = None
         host: str = '<unknown>'
         try:
             conn, address = self._socket.accept()  # accept new connection

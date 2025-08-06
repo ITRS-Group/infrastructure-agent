@@ -8,7 +8,6 @@ import pytest
 from cache.exceptions import (
     ClientApiError,
     ServerApiError,
-    ConfigError,
     UnicodeKeyError,
     CacheItemSizeError,
     CacheTTLError,
@@ -20,7 +19,6 @@ from cache.exceptions import (
     'exception', [
         ClientApiError,
         ServerApiError,
-        ConfigError,
         UnicodeKeyError,
         CacheItemSizeError,
         CacheTTLError,

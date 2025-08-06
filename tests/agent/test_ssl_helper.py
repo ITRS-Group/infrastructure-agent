@@ -35,93 +35,118 @@ def _path_check(pathname):
 
 
 @pytest.mark.parametrize(
-    'tls_config, logall, certerr, exception, logexp', [
+    'tls_config, client_mode, logall, certerr, exception, logexp', [
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', False, None, []), False, None, None,
+            TLSConfig(None, None, 'cert', 'key', False, False, None, []), False, False, None, None,
+            ['foo: Using OpenSSL version ', 'foo: Loading system default CA certificates'],
+            id="default_CA_server_mode"),
+        pytest.param(
+            TLSConfig(None, None, 'cert', 'key', False, False, None, []), True, False, None, None,
+            ['foo: Using OpenSSL version ', 'foo: Loading system default CA certificates'],
+            id="default_CA_client_mode"),
+        pytest.param(
+            TLSConfig(None, None, 'cert', 'key', False, True, None, []), True, False, None, None,
+            ['foo: Using OpenSSL version ', 'foo: Loading system default CA certificates'],
+            id="default_CA_client_mode_check_server_cert"),
+        pytest.param(
+            TLSConfig(None, None, 'cert', 'key', False, False, None, []), True, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Loading system default CA certificates'],
             id="default_CA"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'key', False, None, []), False, None, None,
+            TLSConfig('ca', None, 'cert', 'key', False, False, None, []), False, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_file"),
         pytest.param(
-            TLSConfig('notfound', None, 'cert', 'key', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('notfound', None, 'cert', 'key', False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_file_not_found"),
         pytest.param(
-            TLSConfig('noaccess', None, 'cert', 'key', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('noaccess', None, 'cert', 'key', False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_file_no_access"),
         pytest.param(
-            TLSConfig(None, 'ca', 'cert', 'key', False, None, []), False, None, None,
+            TLSConfig(None, 'ca', 'cert', 'key', False, False, None, []), False, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_path"),
         pytest.param(
-            TLSConfig(None, 'notfound', 'cert', 'key', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig(None, 'notfound', 'cert', 'key', False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_path_not_found"),
         pytest.param(
-            TLSConfig(None, 'noaccess', 'cert', 'key', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig(None, 'noaccess', 'cert', 'key', False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
             id="configured_CA_path_no_access"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', None, False, None, []), False, None, None,
+            TLSConfig('ca', None, 'cert', None, False, False, None, []), False, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Using configured TLS cert_file'],
             id="cert"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'key', False, None, []), False, None, None,
+            TLSConfig('ca', None, 'cert', 'key', False, False, None, []), False, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Using configured TLS cert_file and key_file'],
             id="cert_with_key"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'notfound', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('ca', None, 'cert', 'notfound', False, False, None, []), False, False, None,
+            agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured TLS cert_file and key_file'],
             id="cert_with_key_not_found"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'noaccess', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('ca', None, 'cert', 'noaccess', False, False, None, []), False, False, None,
+            agent.ssl_helper.AgentSSLError,
             ['foo: Using OpenSSL version ', 'foo: Using configured TLS cert_file and key_file'],
             id="cert_with_key_no_access"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'key', False, None, []), True, None, None,
+            TLSConfig('ca', None, 'cert', 'key', False, False, None, []), False, True, None, None,
             ['foo: Logging all TLS messages'],
             id="log_all_true"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'key', False, None, []), True, ssl.SSLError, agent.ssl_helper.AgentSSLError,
+            TLSConfig('ca', None, 'cert', 'key', False, False, None, []), False,
+            True, ssl.SSLError, agent.ssl_helper.AgentSSLError,
             ["foo: TLS key missing or does not match the certificate"],
             id="cert_error"),
         pytest.param(
-            TLSConfig('ca', None, None, 'key', False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('ca', None, None, 'key', False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ["foo: TLS config 'cert_file' not specified"],
             id="no_cert"),
         pytest.param(
-            TLSConfig('ca', None, None, None, False, None, []), False, None, agent.ssl_helper.AgentSSLError,
+            TLSConfig('ca', None, None, None, False, False, None, []), False,
+            False, None, agent.ssl_helper.AgentSSLError,
             ["foo: TLS config 'cert_file' not specified"],
             id="ca_no_cert_no_key"),
         pytest.param(
-            TLSConfig(None, None, None, None, False, None, []), False, None, None,
+            TLSConfig(None, None, None, None, False, False, None, []), False, False, None, None,
             ['foo: Using OpenSSL version ', 'foo: Using configured TLS cert_file and key_file'],
             id="ca_no_cert_no_key_no_cert"),
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', True, None, []), False, None, None,
+            TLSConfig(None, None, 'cert', 'key', True, False, None, []), False, False, None, None,
             ['foo: Check client certificate'],
             id="check_client_certificate"),
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', False, 'cipher', []), False, None, None,
+            TLSConfig(None, None, 'cert', 'key', False, False, 'cipher', []), False, False, None, None,
             ['foo: Using configured TLS ciphers'],
             id="ciphers"),
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', True, 'cipher', []), False, None, None,
+            TLSConfig(None, None, 'cert', 'key', True, False, 'cipher', []), False, False, None, None,
             ['foo: Using configured TLS ciphers', 'foo: Check client certificate'],
             id="ciphers_check_client"),
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', False, None, ['ALL']), False, None, None,
+            TLSConfig(None, None, 'cert', 'key', False, False, None, ['ALL']), False, False, None, None,
             ["foo: Setting Context property 'ssl.OP_ALL'"],
             id="option"),
         pytest.param(
-            TLSConfig(None, None, 'cert', 'key', False, None, ['foo']), False, None, AttributeError,
+            TLSConfig(None, None, 'cert', 'key', False, False, None, ['foo']), False, False, None, AttributeError,
             ["Invalid foo tls_context_option 'foo' in config"],
             id="bad_option"),
         pytest.param(
-            TLSConfig('ca', None, 'cert', 'key', True, 'cipher', ['ALL']), True, None, None,
+            TLSConfig('ca', None, None, None, False, False, None, []), True, False, None, None,
+            ['foo: Using OpenSSL version ', 'foo: Using configured CA Certificate'],
+            id="client_mode_no_cert"),
+        pytest.param(
+            TLSConfig('ca', None, 'cert', 'key', True, False, 'cipher', ['ALL']), False, True, None, None,
             [
                 'foo: Using OpenSSL',
                 'foo: Using configured CA Certificate',
@@ -133,7 +158,7 @@ def _path_check(pathname):
             ],
             id="option"),
     ])
-def test_ssl_helper_get_ssl_context(tls_config, logall, certerr, exception, logexp, mocker, caplog):
+def test_ssl_helper_get_ssl_context(tls_config, client_mode, logall, certerr, exception, logexp, mocker, caplog):
     tls_config.log_all_messages = logall
     mock_context = mocker.Mock()
     mock_context.load_cert_chain.side_effect = certerr
@@ -143,10 +168,10 @@ def test_ssl_helper_get_ssl_context(tls_config, logall, certerr, exception, loge
     mocker.patch('agent.ssl_helper.os.listdir', side_effect=_path_check)
     mocker.patch('agent.ssl_helper.create_self_signed_cert', return_value=('key', 'cert'))
     if not exception:
-        agent.ssl_helper.get_ssl_context(tls_config, 'foo')
+        agent.ssl_helper.get_ssl_context(tls_config, 'foo', client_mode=client_mode)
     else:
         with pytest.raises(exception):
-            agent.ssl_helper.get_ssl_context(tls_config, 'foo')
+            agent.ssl_helper.get_ssl_context(tls_config, 'foo', client_mode=client_mode)
     for text in logexp:
         assert text in caplog.text
 
@@ -182,7 +207,7 @@ def test_ssl_helper_get_ssl_context(tls_config, logall, certerr, exception, loge
 def test_ssl_helper_verify_certificate(returncode, stdout, stderr, cafile, capath, logexp, callexp, mocker, caplog):
     mock_verify = mocker.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
     mock_run = mocker.patch('agent.ssl_helper.subprocess.run', return_value=mock_verify)
-    agent.ssl_helper.verify_certificate(TLSConfig(cafile, capath, 'cert', None, True, None, []))
+    agent.ssl_helper.verify_certificate(TLSConfig(cafile, capath, 'cert', None, True, False, None, []))
     for text in logexp:
         assert text in caplog.text
     assert mock_run.called

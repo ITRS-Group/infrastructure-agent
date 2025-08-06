@@ -5,6 +5,7 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import logging
 import re
@@ -70,3 +71,14 @@ def is_host_in_net_list(host: str, valid_net_list: list[str]) -> bool:
     except ValueError:
         pass  # Not IP addresses
     return False
+
+
+def basic_auth(user: str, password: str) -> str:
+    """Formats a basic authorisation HTTP header"""
+    try:
+        token = f'{user}:{password}'.encode('utf-8')
+        auth_str = base64.encodebytes(token).decode('utf-8').strip()
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        logger.warning('Failed to encode user/password')
+        auth_str = ''
+    return f'Basic {auth_str}'
