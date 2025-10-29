@@ -21,7 +21,7 @@ def format_platform_info(agent_name: str, agent_version: str, is_windows: bool) 
         os_description = get_linux_distro()
 
     return (
-        f"{agent_name} {agent_version}; hostname={platform.node()}"
+        f"{agent_name} {agent_version}; hostname={platform.node()}" # noqa (E702 multiple statements on one line (semicolon))
         f" osname={platform.system()} osvers={os_version} desc={os_description}"
     )
 

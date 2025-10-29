@@ -73,11 +73,11 @@ def get_version(optional_dirs: list[str]) -> str:
     if not commit_timestamp:
         commit_timestamp = int(time.time())
 
-    commit_datetime = datetime.fromtimestamp(commit_timestamp, tz=timezone.utc)
+    commit_datetime = datetime.fromtimestamp(int(commit_timestamp), tz=timezone.utc)
 
     hour_of_year = calc_hour_of_year(commit_datetime)
     year_mod_5 = commit_datetime.year % 5
-    commit_tag = f'{year_mod_5}{hour_of_year:04}'
+    commit_tag = f'{year_mod_5}{hour_of_year:04}' # noqa (E231 missing whitespace after ':')
     template = get_template()
     ver_str = template.replace(COMMIT_MARKER, commit_tag)
     if os.getenv('GERRIT_TOPIC'):

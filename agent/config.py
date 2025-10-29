@@ -56,15 +56,10 @@ DEFAULT_USER_CONFIG_CONTENT = """---
 startup_log: Callable = None
 
 
-class ExecutionStyle(enum.Enum):
+class ExecutionStyle(enum.StrEnum):
     COMMAND_LINE_ARGS = 'COMMAND_LINE_ARGS'
     STDIN_ARGS = 'STDIN_ARGS'
     LONGRUNNING_STDIN_ARGS = 'LONGRUNNING_STDIN_ARGS'
-
-    def __str__(self):
-        # TODO - Once we're on Python 3.12 we can swap this
-        #        to being a StrEnum and remove this method
-        return self.value
 
 
 DEFAULT_EXECUTION_STYLE = ExecutionStyle.COMMAND_LINE_ARGS
@@ -105,12 +100,12 @@ class AbstractConfig:
             import re
 
             # __init__() missing 1 required positional argument: 'receive_data_timeout'
-            match = re.match(r'__init__\(\) missing .*: (.*)$', str(ex))
+            match = re.match(r'.*__init__\(\) missing .*: (.*)$', str(ex))
             if match:
                 raise ConfigurationError(f"Configuration missing from '{cls.NAME}': {match.group(1)}")
 
             # __init__() got an unexpected keyword argument 'foo'
-            match = re.match(r"__init__\(\) got an unexpected .* '(.*)'$", str(ex))
+            match = re.match(r".*__init__\(\) got an unexpected .* '(.*)'$", str(ex))
             if match:
                 raise ConfigurationError(f"Unexpected configuration in '{cls.NAME}': '{match.group(1)}'")
 

@@ -73,8 +73,8 @@ class ForwarderClient:
         This method could protentially block if the queue is full.
         """
         logger.debug(
-            f"ForwarderClient: Queuing result for host={host!r}, service={service!r}, status={status},"
-            f" output={output!r}, result_time={result_time}"
+            f"ForwarderClient: Queuing result for host={host!r}, service={service!r}, status={status}, "
+            f"output={output!r}, result_time={result_time}"
         )
         self._send_queue.put(ResultRecord(host, service, status, output, result_time))
 

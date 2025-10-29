@@ -29,6 +29,7 @@ POLLER_DATA_PREFIX = 'PollerData'
 POLLER_EXEC_PREFIX = 'PollerExec'
 ENV_AGENT_POLLER_DATA = 'AGENT_POLLER_DATA'
 ENV_AGENT_POLLER_EXEC = 'AGENT_POLLER_EXEC'
+ENV_POLLER_INTERVAL = 'POLLER_INTERVAL'
 POLLER_EXEC_NORMAL = '1'
 POLLER_EXEC_CALLED = '2'
 CACHE_TIME_SECS = 1800
@@ -72,6 +73,7 @@ class Poller:
         self._cache.set(usage_key, str(now), CACHE_TIME_SECS)  # Mark that the EXEC is taking place
         return {
             ENV_AGENT_POLLER_DATA: (existing_data.data or '') if existing_data else '',
+            ENV_POLLER_INTERVAL: str(self._poller_config[script_name].interval),
         }
 
     def run(self) -> None:
@@ -135,10 +137,12 @@ class Poller:
             env = {
                 ENV_AGENT_POLLER_EXEC: POLLER_EXEC_CALLED if called_flag else POLLER_EXEC_NORMAL,
                 ENV_AGENT_POLLER_DATA: (existing_data.data or '') if existing_data else '',
+                ENV_POLLER_INTERVAL: str(script_info.interval),
             }
 
         try:
             logger.debug("Executing script '%s'", script_name)
+            logger.debug("Poller scheduled as %d seconds", script_info.interval)
             exit_code, stdout, stderr, _ = self._script_runner.run_script(script_info.script, [], env)
         except Exception as e:
             logger.error("Error executing script '%s': %s", script_name, e)
@@ -150,9 +154,9 @@ class Poller:
                 if stderr:
                     out = stdout.split('|', 1)
                     if len(out) > 1:
-                        output = f'{out[0]}; {stderr} |{out[1]}'
+                        output = f'{out[0]}; {stderr} |{out[1]}' # noqa E702
                     else:
-                        output = f'{stdout} ; {stderr}'
+                        output = f'{stdout} ; {stderr}' # noqa E203,E702
                 client = self._client_by_name[script_info.forwarder]
                 now = int(time.time())
                 client.queue_result(hostname, servicecheckname, exit_code, output, now)

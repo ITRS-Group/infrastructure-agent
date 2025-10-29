@@ -5,10 +5,10 @@
 3. [Installation](#Installation)
 
 ## Prerequisites
-* [Python 3.9.x with the `venv` module installed](https://www.python.org/)
+* [Python 3.13.x with the `venv` module installed](https://www.python.org/)
   * For Ubuntu sytems, these can be found in the [deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa).
     ```shell
-    apt install python3.9 python3.9-venv python3.9-dev
+    apt install python3.13 python3.13-venv python3.13-dev
     ```
   * For other distributions, you may have to [build Python from source](https://devguide.python.org/getting-started/setup-building/).
 * [GNU Make](https://www.gnu.org/software/make/)
@@ -40,7 +40,7 @@
 ```shell
 # Note: 'sudo' is needed to compile plugins from monitoring-plugins
 # This will also create an 'infra-agent' user and group on the build machine
-sudo make clean tar PYTHON=/usr/bin/python3.9
+sudo make clean tar PYTHON=/usr/bin/python3.13
 ```
 * The compiled agent can be found at `infrastructure-agent.tar.gz`.
 

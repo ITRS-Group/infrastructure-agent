@@ -76,7 +76,7 @@ def is_host_in_net_list(host: str, valid_net_list: list[str]) -> bool:
 def basic_auth(user: str, password: str) -> str:
     """Formats a basic authorisation HTTP header"""
     try:
-        token = f'{user}:{password}'.encode('utf-8')
+        token = f'{user}:{password}'.encode('utf-8') # noqa (E231 missing whitespace after ':')
         auth_str = base64.encodebytes(token).decode('utf-8').strip()
     except (UnicodeDecodeError, UnicodeEncodeError):
         logger.warning('Failed to encode user/password')

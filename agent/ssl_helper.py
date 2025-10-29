@@ -5,6 +5,7 @@ Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
 
 from __future__ import annotations
 
+
 import logging
 import os
 import socket
@@ -35,6 +36,7 @@ KEY_SIZE = 2048
 
 class AgentSSLError(Exception):
     """SSL exceptions"""
+
     pass
 
 
@@ -134,8 +136,12 @@ def verify_certificate(tls_config: TLSConfig):
 
 
 def ssl_debug_message_callback(
-        _conn: ssl.SSLSocket, direction: str, version: ssl.TLSVersion,
-        content_type: ssl._TLSContentType, msg_type: ssl._TLSMessageType, _data: bytes):
+        _conn: ssl.SSLSocket,
+        direction: str,
+        version: ssl.TLSVersion,
+        content_type: ssl._TLSContentType,
+        msg_type: ssl._TLSMessageType,
+        _data: bytes):
     """
     Called after every TLS protocol message (not application messages) this function debug logs:
       * the direction of the message (read/write)
@@ -193,22 +199,20 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
     now = datetime.now(timezone.utc)
 
     # Create the certificate
-    cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        issuer
-    ).public_key(
-        private_key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        now
-    ).not_valid_after(
-        now + timedelta(days=100 * 365)  # Good for a long time
-    ).add_extension(
-        x509.SubjectAlternativeName([x509.DNSName('localhost')]),
-        critical=False,
-    ).sign(private_key, hashes.SHA256(), backend=default_backend())
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + timedelta(days=100 * 365))  # Good for a long time
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName('localhost')]),
+            critical=False,
+        )
+        .sign(private_key, hashes.SHA256(), backend=default_backend())
+    )
     with open(cert_path, 'wb', opener=open_with_mode(0o644)) as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))
     return private_key_path.resolve(), cert_path.resolve()
@@ -216,6 +220,8 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
 
 def open_with_mode(mode):
     """Creates a new file opener with a specific mode"""
+
     def opener(path, flags):
         return os.open(path, flags, mode)
+
     return opener

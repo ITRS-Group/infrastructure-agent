@@ -49,22 +49,22 @@ def test_poller_run_with_no_pollers(empty_poller, caplog):
 @pytest.mark.parametrize('script, interval, cache_data, executed, exit_code, arguments, expected_env', [
     pytest.param(
         'script1.py', 1, 'cd1', False, 0, [],
-        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
+        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1', 'POLLER_INTERVAL': '1'},
         id="Normal schedule after 1 second"
     ),
     pytest.param(
         'script1.py', 0, 'cd1', False, 0, [],
-        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
+        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1', 'POLLER_INTERVAL': '0'},
         id="Instant schedule"
     ),
     pytest.param(
         'script1.py', 1, 'cd2', True, 0, [],
-        {'AGENT_POLLER_EXEC': POLLER_EXEC_CALLED, 'AGENT_POLLER_DATA': 'cd2'},
+        {'AGENT_POLLER_EXEC': POLLER_EXEC_CALLED, 'AGENT_POLLER_DATA': 'cd2', 'POLLER_INTERVAL': '1'},
         id="Plugin called"
     ),
     pytest.param(
         'script1.py', 1, 'cd1', False, 1, [],
-        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1'},
+        {'AGENT_POLLER_EXEC': POLLER_EXEC_NORMAL, 'AGENT_POLLER_DATA': 'cd1', 'POLLER_INTERVAL': '1'},
         id="Script error"
     ),
 ])
@@ -192,7 +192,11 @@ def test_get_poller_env_no_config(empty_poller):
 
 
 @pytest.mark.parametrize('poller_script, search_script, interval, cache_data, cache_set_called, expected_env', [
-    pytest.param('script1.py', 'script1.py', 1, 'cd1', True, {'AGENT_POLLER_DATA': 'cd1'}, id="Valid search script"),
+    pytest.param(
+        'script1.py', 'script1.py', 1, 'cd1', True,
+        {'AGENT_POLLER_DATA': 'cd1', 'POLLER_INTERVAL': '1'},
+        id="Valid search script"
+    ),
     pytest.param('script1.py', 'script2.py', 1, 'cd1', False, {}, id="Invalid search script"),
 ])
 def test_get_poller_env(mocker, poller_script, search_script, interval, cache_data, cache_set_called, expected_env):

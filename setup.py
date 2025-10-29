@@ -10,7 +10,7 @@ TOX = 'TOX_WORK_DIR' in os.environ
 SCRIPT_DIR = os.path.dirname(__file__)
 
 if TOX:
-    from distutils.core import setup
+    from setuptools import setup
 else:
     from cx_Freeze import Executable, setup
 
