@@ -5,7 +5,7 @@ the 'VERSION' file.
 The source for the version comes from the 'AGENT_VERSION' template file that
 contains the real major and minor version and a marker for the build/commit tag.
 (e.g. 1.1.$COMMIT$)
-Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 """
 
 import argparse

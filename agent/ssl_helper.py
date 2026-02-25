@@ -1,6 +1,6 @@
 """
 Infrastructure Agent: SSL helper functions
-Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 """
 
 from __future__ import annotations
@@ -169,13 +169,14 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
     """
     os.makedirs(output_dir, exist_ok=True)
     hostname = f'{socket.gethostname()}-{config_name}'
+    fqdn = socket.getfqdn()
     base_path = get_agent_root() / output_dir / hostname
     private_key_path = base_path.with_suffix('.key')
     cert_path = base_path.with_suffix('.crt')
     if private_key_path.exists() and cert_path.exists():
         return private_key_path.resolve(), cert_path.resolve()
 
-    logger.info("%s: Creating new self-signed certificate for '%s'", config_name, hostname)
+    logger.info("%s: Creating new self-signed certificate for '%s'", config_name, fqdn)
     private_key = rsa.generate_private_key(
         KEY_PUBLIC_EXPONENT,
         KEY_SIZE,
@@ -193,7 +194,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
         x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "London"),
         x509.NameAttribute(NameOID.LOCALITY_NAME, "EC2"),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ITRS Group Ltd"),
-        x509.NameAttribute(NameOID.COMMON_NAME, hostname),
+        x509.NameAttribute(NameOID.COMMON_NAME, fqdn),
     ])
 
     now = datetime.now(timezone.utc)
@@ -208,7 +209,7 @@ def create_self_signed_cert(config_name: str, output_dir: str) -> tuple[str, str
         .not_valid_before(now)
         .not_valid_after(now + timedelta(days=100 * 365))  # Good for a long time
         .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName('localhost')]),
+            x509.SubjectAlternativeName([x509.DNSName(fqdn)]),
             critical=False,
         )
         .sign(private_key, hashes.SHA256(), backend=default_backend())

@@ -1,5 +1,5 @@
 <!-- Infrastructure Agent Installer Bundle -->
-<!-- Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved -->
+<!-- Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
 
