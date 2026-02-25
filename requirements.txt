@@ -1,17 +1,19 @@
-# Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
+# Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 # Python libraries used by (or to build) the infrastructure-agent
 
-cffi==1.17.1
-cryptography==45.0.3
-cx-freeze==8.3.0
-gevent==25.5.1
-geventhttpclient==2.3.3
-greenlet==3.2.2
-patchelf==0.17.2.1; sys_platform != 'win32'
-psutil==7.0.0; sys_platform == 'win32'
-pycparser==2.22
+cffi==2.0.0
+cryptography==46.0.4
+cx-freeze==8.5.3
+cx-logging==3.2.1; sys_platform == 'win32'
+gevent==25.9.1
+geventhttpclient==2.3.7
+greenlet==3.3.1
+patchelf==0.17.2.4; sys_platform != 'win32'
+psutil==7.2.2; sys_platform == 'win32'
+pywin32==311; sys_platform == 'win32'
+pycparser==3.0
 pycryptodome==3.23.0
-PyYAML==6.0.2
+PyYAML==6.0.3
 sortedcontainers==2.4.0
-zope.event==5.0
-zope.interface==7.2
+zope.event==6.1
+zope.interface==8.2

@@ -1,7 +1,6 @@
-# Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
+# Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 # Dependencies of the libraries listed in requirements.txt
 
 Brotli==1.1.0
 urllib3==2.4.0
-certifi-2025==4.26
-
+certifi-2026==1.4

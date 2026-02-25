@@ -1,6 +1,6 @@
 """
 Infrastructure Agent: Setup configuration
-Copyright (C) 2003-2025 ITRS Group Ltd. All rights reserved
+Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 """
 
 import os
@@ -21,7 +21,7 @@ except FileNotFoundError:
     VERSION = '0.0.0'  # Probably from `make test` or similar
 
 EXECUTABLE_CONFIG = {
-    "copyright": "Copyright (C) 2003-2025 ITRS Group Ltd.",
+    "copyright": "Copyright (C) 2003-2026 ITRS Group Ltd.",
     "icon": "icon.ico"
 }
 
@@ -34,13 +34,15 @@ if TOX:
 elif sys.platform.startswith('win32'):
     executables = [
         # Service Executable
-        Executable(script="win_svce_config.py", target_name="infra-svce.exe", base="Win32Service", **EXECUTABLE_CONFIG),
+        Executable(script="win_svce_config.py", target_name="infra-svce.exe", base="service", **EXECUTABLE_CONFIG),
         # Main Executable
         Executable(script="main.py", target_name="infra-agent.exe", **EXECUTABLE_CONFIG)
     ]
     build_exe_options = build_exe_options | {
         "include_files": ["icon.ico"],
-        "includes": ["cx_Logging", "win_svce_handler"],
+        "includes": ["win_svce_handler"],
+        # pywin32 packages required by cx_Freeze "service" base for --install/--uninstall and service runtime
+        "packages": ["win32serviceutil", "win32service", "win32event", "servicemanager", "win32timezone"],
         # Not setting include_msvcr as we bundle the eventual MSI with the Visual C++ redistributable installer
     }
 else:
@@ -48,21 +50,23 @@ else:
         Executable(script='main.py', target_name="infrastructure-agent", base='Console', **EXECUTABLE_CONFIG)
     ]
 
-setup(
-    name='infrastructure-agent',
-    version=VERSION,
-    description="Infrastructure Agent",
-    author="ITRS Group Ltd",
-    author_email="",
-    url="https://itrsgroup.com/",
-    options={'build_exe': build_exe_options},
-    executables=executables,
-    py_modules=[],
-    tests_require=[
-        'coverage',
-        'flake8',
-        'pytest',
-        'pytest-cov',
-        'pytest-mock',
-    ],
-)
+setup_kwargs = {
+    "name": "infrastructure-agent",
+    "version": VERSION,
+    "description": "Infrastructure Agent",
+    "author": "ITRS Group Ltd",
+    "author_email": "",
+    "url": "https://itrsgroup.com/",
+    "options": {"build_exe": build_exe_options},
+    "executables": executables,
+    "py_modules": [],
+}
+if TOX:
+    setup_kwargs["tests_require"] = [
+        "coverage",
+        "flake8",
+        "pytest",
+        "pytest-cov",
+        "pytest-mock",
+    ]
+setup(**setup_kwargs)
