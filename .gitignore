@@ -33,6 +33,7 @@ plugnpshell
 .tox
 cert.pem
 htmlcov
+coverage.xml
 junix.xml
 key.pem
 MANIFEST

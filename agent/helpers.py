@@ -34,7 +34,7 @@ def merge_dictionary(original: dict, updates: dict, merge_lists: tuple[str] = ()
                     isinstance(value, list) and
                     key in original and
                     key in merge_lists and
-                    type(original[key]) == type(value)
+                    type(original[key]) is type(value)
             ):
                 # add to existing value
                 original[key] += value
