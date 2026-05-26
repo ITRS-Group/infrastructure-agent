@@ -2,12 +2,12 @@
 # Python libraries used by (or to build) the infrastructure-agent
 
 cffi==2.0.0
-cryptography==46.0.4
-cx-freeze==8.5.3
+cryptography==46.0.7
+cx-freeze==8.6.4
 cx-logging==3.2.1; sys_platform == 'win32'
-gevent==25.9.1
-geventhttpclient==2.3.7
-greenlet==3.3.1
+gevent==26.4.0
+geventhttpclient==2.3.9
+greenlet==3.4.0
 patchelf==0.17.2.4; sys_platform != 'win32'
 psutil==7.2.2; sys_platform == 'win32'
 pywin32==311; sys_platform == 'win32'
@@ -16,4 +16,4 @@ pycryptodome==3.23.0
 PyYAML==6.0.3
 sortedcontainers==2.4.0
 zope.event==6.1
-zope.interface==8.2
+zope.interface==8.3

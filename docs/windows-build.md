@@ -5,7 +5,7 @@
 3. [Installation](#Installation)
 
 ## Prerequisites
-* [Python 3.13.x with the `venv` module installed](https://www.python.org/)
+* [Python 3.14.x with the `venv` module installed](https://www.python.org/)
 * [.NET 3.5 via Windows Server Manager](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/enable-net-framework-35-by-using-the-add-roles-and-features-wizard)
 * [Git for Windows](https://git-scm.com/downloads/win)
 * [WiX Toolset 5.0](https://github.com/wixtoolset/wix/)

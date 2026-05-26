@@ -7,9 +7,9 @@ where python >nul 2>nul
 if ERRORLEVEL 1 (
     echo [ERROR] Unable to find 'python' executable in PATH && exit /B 1
 )
-python --version | findstr /E 3.13.[0-9][0-9]* >nul
+python --version | findstr /E 3.14.[0-9][0-9]* >nul
 if ERRORLEVEL 1 (
-    echo [ERROR] Python binary found is not a version of Python 3.13.x && exit /B 1
+    echo [ERROR] Python binary found is not a version of Python 3.14.x && exit /B 1
 )
 where wix >nul 2>nulc
 if ERRORLEVEL 1 (
@@ -44,7 +44,7 @@ if NOT DEFINED WINDOWS_PLUGIN_DIR (
 
 set PLUGNPSHELL_DIR=plugnpshell
 
-set SDIR=build\exe.win-amd64-3.13
+set SDIR=build\exe.win-amd64-3.14
 set BUILD_EXE_DIR=%SDIR%\bin
 set CFG_DIR=%SDIR%\cfg
 set LICENSES_DIR=%SDIR%\licenses

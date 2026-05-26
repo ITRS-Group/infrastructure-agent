@@ -16,7 +16,7 @@ CFG ?= $(CFG_DIR)/agent.default.yml
 VAR_DIR ?= $(BASE_DIR)/var
 TAR_FILE ?= infrastructure-agent.tar.gz
 AGENT_SERVICE_FILE ?= infrastructure-agent.service
-CX_FREEZE_DIR ?= build/exe.linux-x86_64-3.13
+CX_FREEZE_DIR ?= build/exe.linux-x86_64-3.14
 
 PYTHON ?= $(shell which python3)
 ifdef PYTHON
@@ -31,8 +31,8 @@ TEST_CERTS = tests/resources/certs
 
 # Versions of Python we support (Python 3.x)
 SUPPORTED_PYTHON_MAJOR_VERSION = 3
-SUPPORTED_PYTHON_MINOR_VERSIONS_MIN := 13
-SUPPORTED_PYTHON_MINOR_VERSIONS_MAX := 13
+SUPPORTED_PYTHON_MINOR_VERSIONS_MIN := 14
+SUPPORTED_PYTHON_MINOR_VERSIONS_MAX := 14
 
 check_python_version:
 ifndef PYTHON
