@@ -1,6 +1,8 @@
-import gevent
 import logging
+import os
 from dataclasses import dataclass
+
+import gevent
 from gevent import greenlet
 from gevent.event import Event
 from gevent.lock import BoundedSemaphore
@@ -89,7 +91,14 @@ class ProcessManager:
         try:
             while True:
                 try:
-                    p_item.proc = Popen([path], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+                    popen_kwargs = {
+                        'stdin': PIPE,
+                        'stdout': PIPE,
+                        'stderr': PIPE,
+                    }
+                    if os.name != 'nt':
+                        popen_kwargs['cwd'] = '/'
+                    p_item.proc = Popen([path], **popen_kwargs)
                 except Exception as e:
                     raise Exception(f"Could not launch the process at '{path}'") from e
                 proc_event.set()  # Indicate that we have a process

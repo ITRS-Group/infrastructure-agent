@@ -15,8 +15,12 @@ logging:
       level: INFO
     nrpe:
       level: INFO
+    tls:
+      level: INFO
 
 server:
+  # Null/unset becomes [] (with a warning) when tls.connector is pkcs11 or schannel.
+  # A non-empty list is still used for host filtering.
   allowed_hosts:
   allow_multi_packet_response: True
   bind_address: 0.0.0.0
@@ -26,20 +30,42 @@ server:
   max_active_connections: 15
   max_request_time: 120
   receive_data_timeout: 5
+  # Forced true (with a warning) when tls.connector is pkcs11 or schannel.
   tls_enabled: True
   tls_handshake_timeout: 3
   tls:
+    # Identity source: file (PEM paths), pkcs11, or schannel.
+    #   file     — all platforms (cert_file / key_file / optional key_passphrase)
+    #   pkcs11   — Linux token identity; host CA/ciphers/protocols; forces mTLS
+    #   schannel — Windows Server 2019+ / Win10 1809+; forces mTLS
+    connector: file
     ca_cert:
     ca_path:
     cert_file:
     key_file:
+    # Passphrase for an encrypted PEM/PKCS#8 private key (file connector only).
+    # Quote it. An unquoted number or boolean is rejected (key_passphrase: "0123").
+    key_passphrase:
+    # PKCS#11 / Schannel nests must not be set when connector is file.
+    # pkcs11:
+    #   module_path:
+    #   identity_cert:
+    #     uri:
+    #     pin:
+    #   identity_cert_file:
+    #   identity_key:
+    #     uri:
+    #     pin:
+    # schannel:
+    #   identity_cert_name:
+    #   identity_cert_thumbprint:
+    #   identity_cert_store:
     check_client_cert: False
     check_server_cert: True
-    cipher_suite: 'ECDH+AESGCM:ECDH+AES256:ECDH+AES128:!aNULL:!MD5:!DSS'
-    context_options:
-      - NO_SSLv3
-      - NO_TLSv1
-      - NO_TLSv1_1
+    # cipher_suite / context_options: file connector only (defaults applied in code).
+    # Ignored (with a warning) when connector is pkcs11 or schannel.
+    cipher_suite:
+    context_options: []
 
 execution:
   execution_timeout: 60

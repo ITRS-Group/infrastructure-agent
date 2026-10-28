@@ -3,6 +3,11 @@ Infrastructure Agent: Unit tests for logger
 Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 """
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from mock import call
 
@@ -29,6 +34,39 @@ def test_logger_init_logging(config, exception, mocker):
     else:
         with pytest.raises(exception):
             agent.logger.init_logging(config)
+
+
+def test_init_logging_reconfigures_loggers_created_before_configuration(tmp_path):
+    """A logger created before init_logging still writes to the configured file.
+
+    Runs in a subprocess so dictConfig does not change logger levels for the
+    rest of the suite.
+    """
+    log_path = tmp_path / 'agent.log'
+    script = """
+import logging
+import agent.logger
+
+log_path = %r
+early = logging.getLogger('nrpe.server')
+agent.logger.init_logging({'handlers': {'file': {'filename': log_path}}})
+early.warning("Connection rejected: host 'example'")
+text = open(log_path, encoding='utf-8').read()
+if "Connection rejected: host 'example'" not in text:
+    raise SystemExit('expected warning was not written to ' + log_path)
+""" % str(log_path)
+    env = os.environ.copy()
+    src_root = Path(__file__).resolve().parents[2]
+    env['PYTHONPATH'] = os.pathsep.join(filter(None, (str(src_root), env.get('PYTHONPATH'))))
+    completed = subprocess.run(
+        [sys.executable, '-c', script],
+        cwd=str(src_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr or completed.stdout
 
 
 @pytest.mark.parametrize(

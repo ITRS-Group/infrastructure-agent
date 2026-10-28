@@ -28,6 +28,49 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Set by SIGTERM. The gevent handler also calls Agent.stop when the server
+# loop is running; this flag covers the window before that loop starts.
+shutdown_requested = False
+
+
+def request_shutdown() -> None:
+    """Record that SIGTERM asked the process to exit."""
+    global shutdown_requested
+    shutdown_requested = True
+
+
+def handle_sigterm(agent: 'Agent | None') -> None:
+    """Stop a running agent so shutdown can unlink PKCS#11 PIN files.
+
+    The gevent hub runs this outside the restricted C signal handler.
+    SIGKILL cannot be caught; startup removes PIN files that kill leaves behind.
+    """
+    request_shutdown()
+    if agent is not None:
+        agent.stop(is_error=False)
+
+
+# gevent drops the handler if this watcher is garbage-collected.
+_sigterm_watcher = None
+
+
+def install_sigterm_handler(callback) -> bool:
+    """Install a gevent SIGTERM handler. False when this platform cannot."""
+    global _sigterm_watcher
+    import signal
+
+    try:
+        import gevent
+    except ImportError:
+        return False
+    if not hasattr(signal, 'SIGTERM'):
+        return False
+    try:
+        _sigterm_watcher = gevent.signal_handler(signal.SIGTERM, callback)
+    except (OSError, ValueError):
+        return False
+    return True
+
 
 class Agent:
     """infrastructure agent"""
@@ -61,6 +104,8 @@ class Agent:
 
     def run(self) -> int:
         """Spawn the cache manager and NRPE server"""
+        if shutdown_requested:
+            return 0
         self.nrpe_listener = NRPEListener(
             platform=self.get_platform(),
             server_config=self._config.server,
@@ -73,6 +118,10 @@ class Agent:
             gevent.spawn(self._gproxy, self._poller.run),
             gevent.spawn(self._gproxy, self._process_recycler),
         ]
+        # SIGTERM during spawn runs the handler before this list is stored.
+        if shutdown_requested:
+            self.stop(is_error=False)
+            return 0
         gevent.joinall(self._greenlets)
         return 1 if self._terminated_with_error else 0
 
@@ -80,18 +129,55 @@ class Agent:
         """Terminate the agent"""
         if is_error:
             self._terminated_with_error = True
-        if self._poller:
-            self._poller.close()
-            self._poller = None
-        if self._greenlets:
-            gevent.killall(self._greenlets, block=False)
-            self._greenlets.clear()
-        if self._process_manager:
-            self._process_manager.kill_all()
-            self._process_manager = None
-        if self._script_runner:
-            self._script_runner.kill_running()
-            self._script_runner = None
+        # Kill the server greenlets before teardown that can raise. The SIGTERM
+        # callback runs in a gevent greenlet that swallows exceptions, so a
+        # failure in poller.close() must not leave joinall blocked after the
+        # PIN files are removed.
+        if not self._kill_server_greenlets():
+            return
+        try:
+            listener = getattr(self, 'nrpe_listener', None)
+            if listener is not None:
+                try:
+                    listener.close()
+                except Exception:
+                    logger.debug("NRPE listener close failed", exc_info=True)
+                self.nrpe_listener = None
+            if self._poller:
+                self._poller.close()
+                self._poller = None
+            if self._process_manager:
+                self._process_manager.kill_all()
+                self._process_manager = None
+            if self._script_runner:
+                self._script_runner.kill_running()
+                self._script_runner = None
+        finally:
+            # After the listener is closed the token key will not sign again.
+            self._close_pkcs11_pin_files()
+
+    def _kill_server_greenlets(self) -> bool:
+        """Stop the server greenlets. False when they are still running."""
+        greenlets = self._greenlets
+        self._greenlets = []
+        if not greenlets:
+            return True
+        try:
+            gevent.killall(greenlets, block=False)
+        except Exception:
+            # Leave the PIN files. The server loop is still running and can
+            # sign until a later stop succeeds or the process is killed.
+            self._greenlets = greenlets
+            logger.exception("Failed to stop agent greenlets")
+            return False
+        return True
+
+    def _close_pkcs11_pin_files(self) -> None:
+        try:
+            from agent.pkcs11 import close_pin_files
+            close_pin_files()
+        except Exception:
+            logger.debug("PKCS#11 PIN file cleanup failed", exc_info=True)
 
     def _gproxy(self, func: Callable, *args):
         """Proxies the greenlet function allowing any exceptions to kill the process."""

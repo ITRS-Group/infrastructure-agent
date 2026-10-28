@@ -175,6 +175,9 @@ class ScriptRunner:
         if not self.platform.is_windows:
             # Creates a new process group for the process, so the group can be killed
             subprocess_kwargs['preexec_fn'] = os.setsid
+            # Historical systemd cwd was /. Keep plugins there even if the
+            # service WorkingDirectory is later set to the install root.
+            subprocess_kwargs['cwd'] = '/'
 
         return args, subprocess_kwargs
 

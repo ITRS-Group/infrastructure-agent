@@ -34,7 +34,7 @@
   cd infrastructure-agent
   ln -s ../infrastructure-agent-linux-plugins .
   ```
-* Locate the path of the Python 3.9 binary.
+* Locate the path of the Python 3.14 binary.
   * On most systems this is likely to be under `/usr/bin` but this will vary
 * Run the compilation command, passing in the path of your Python binary
 ```shell
