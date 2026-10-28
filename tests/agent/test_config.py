@@ -15,6 +15,7 @@ from agent.config import (
     STARTUP_LOG_REL_PATH,
     AbstractConfig,
     AgentConfig,
+    CacheManagerConfig,
     CommandConfig,
     ConfigurationError,
     EnvironmentVariableConfig,
@@ -22,6 +23,10 @@ from agent.config import (
     ExecutionStyle,
     ForwarderClientConfig,
     PollerScheduleConfig,
+    PYTHON_SSL_DEFAULT_CIPHER_SUITE,
+    PYTHON_SSL_DEFAULT_CONTEXT_OPTIONS,
+    ServerConfig,
+    TLSConfig,
     create_default_user_config_if_required,
     get_config,
     get_startup_log_path,
@@ -654,3 +659,910 @@ def test_forwarder_client_config(idle_timeout, exception):
 def test_poller_schedule_config(config, count):
     psc = PollerScheduleConfig.from_dict(config)
     assert len(psc) == count
+
+
+def test_tls_config_pkcs12_rejected():
+    with pytest.raises(ConfigurationError, match="Unexpected configuration in 'tls': 'p12_path'"):
+        TLSConfig.from_dict({'p12_path': 'identity.p12'})
+
+
+def test_tls_config_key_passphrase_ok():
+    cfg = TLSConfig(
+        cert_file='cert.pem',
+        key_file='key.pem',
+        key_passphrase='secret',
+    )
+    assert cfg.key_passphrase == 'secret'
+    assert 'secret' not in repr(cfg)
+
+
+def test_tls_config_key_passphrase_requires_pem_identity():
+    with pytest.raises(ConfigurationError, match="must set 'cert_file' or 'key_file'"):
+        TLSConfig(key_passphrase='secret')
+
+
+@pytest.mark.parametrize('key_passphrase', [1234, True])
+def test_tls_config_key_passphrase_rejects_unquoted_scalar(key_passphrase):
+    with pytest.raises(ConfigurationError, match="TLS config 'key_passphrase' must be a string"):
+        TLSConfig(cert_file='cert.pem', key_file='key.pem', key_passphrase=key_passphrase)
+
+
+def test_tls_config_key_passphrase_from_dict_rejects_numeric_passphrase():
+    with pytest.raises(ConfigurationError, match="TLS config 'key_passphrase' must be a string"):
+        TLSConfig.from_dict({
+            'cert_file': 'cert.pem',
+            'key_file': 'key.pem',
+            'key_passphrase': 1234,
+        })
+
+
+def test_tls_config_key_passphrase_strips_whitespace():
+    cfg = TLSConfig(cert_file='cert.pem', key_file='key.pem', key_passphrase='  secret  ')
+    assert cfg.key_passphrase == 'secret'
+
+
+def test_tls_config_pkcs11_ignores_leftover_key_passphrase(monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        'agent.config.startup_log',
+        lambda message, prefix='[INFO]': messages.append(f'{prefix} {message}'),
+    )
+    cfg = TLSConfig.from_dict(section='server', config={
+        'connector': 'pkcs11',
+        'key_passphrase': 'secret',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    })
+    assert cfg.key_passphrase is None
+    assert any(
+        line.startswith('[WARNING] Ignoring leftover TLS file options') and 'key_passphrase' in line
+        for line in messages
+    )
+
+
+@pytest.mark.parametrize('connector', ['pkcs11', 'schannel'])
+@pytest.mark.parametrize('key_passphrase', [1234, True])
+def test_tls_config_unquoted_key_passphrase_rejected_before_leftover_clear(connector, key_passphrase):
+    config = {'connector': connector, 'key_passphrase': key_passphrase}
+    if connector == 'pkcs11':
+        config['pkcs11'] = {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        }
+    else:
+        config['schannel'] = {'identity_cert_name': 'host'}
+    with pytest.raises(ConfigurationError, match="TLS config 'key_passphrase' must be a string"):
+        TLSConfig.from_dict(section='server', config=config)
+
+
+def test_tls_config_pkcs11_xor_cert_sources():
+    with pytest.raises(ConfigurationError, match='only one of pkcs11.identity_cert'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='pkcs11:object=cert',
+            cert_file='cert.pem',
+        )
+
+
+def test_tls_config_pkcs11_requires_module():
+    with pytest.raises(ConfigurationError, match='pkcs11.module_path'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='pkcs11:object=cert',
+        )
+
+
+def test_tls_config_pkcs11_requires_pkcs11_uri_scheme():
+    with pytest.raises(ConfigurationError, match="must start with 'pkcs11:'"):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='file:/tmp/key.pem',
+            pkcs11_cert_uri='pkcs11:object=cert',
+        )
+
+
+def test_tls_config_pkcs11_rejects_numeric_pin():
+    with pytest.raises(ConfigurationError, match="must be a string"):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='pkcs11:object=cert',
+            pkcs11_key_pin=1234,
+        )
+
+
+def test_tls_config_pkcs11_from_dict_rejects_numeric_pin():
+    with pytest.raises(ConfigurationError, match="pkcs11.identity_key.pin"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key', 'pin': 1234},
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_from_dict_rejects_numeric_cert_pin():
+    with pytest.raises(ConfigurationError, match="pkcs11.identity_cert.pin"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+                'identity_cert': {'uri': 'pkcs11:object=cert', 'pin': 5678},
+            },
+        })
+
+
+def test_tls_config_pkcs11_ok():
+    cfg = TLSConfig(
+        connector='pkcs11',
+        cert_file='cert.pem',
+        pkcs11_module='token.so',
+        pkcs11_key_uri='pkcs11:object=key',
+        pkcs11_key_pin='1234',
+    )
+    assert cfg.pkcs11_module == 'token.so'
+    assert cfg.pkcs11_key_uri == 'pkcs11:object=key'
+    assert cfg.pkcs11_key_pin == '1234'
+    assert cfg.cert_file == 'cert.pem'
+    assert cfg.ca_cert == 'system'
+    assert '1234' not in repr(cfg)
+
+
+def test_tls_config_secrets_omitted_from_repr():
+    cfg = TLSConfig(
+        connector='pkcs11',
+        pkcs11_module='token.so',
+        pkcs11_key_uri='pkcs11:object=key',
+        pkcs11_cert_uri='pkcs11:object=cert',
+        pkcs11_key_pin='pin-secret',
+        pkcs11_cert_pin='cert-secret',
+    )
+    assert 'pin-secret' not in repr(cfg)
+    assert 'cert-secret' not in repr(cfg)
+
+
+def test_tls_config_key_passphrase_omitted_from_repr():
+    cfg = TLSConfig(
+        cert_file='cert.pem',
+        key_file='key.pem',
+        key_passphrase='pem-secret',
+    )
+    assert 'pem-secret' not in repr(cfg)
+
+
+def test_tls_config_pkcs11_engine_rejected():
+    with pytest.raises(ConfigurationError, match="Unexpected configuration in 'tls': 'pkcs11_engine'"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11_engine': 'pkcs11.so',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_from_dict_nested():
+    cfg = TLSConfig.from_dict(section='server', config={
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key', 'pin': '1234'},
+            'identity_cert': {'uri': 'pkcs11:object=cert', 'pin': '5678'},
+        },
+    })
+    assert cfg.pkcs11_key_uri == 'pkcs11:object=key'
+    assert cfg.pkcs11_cert_uri == 'pkcs11:object=cert'
+    assert cfg.pkcs11_key_pin == '1234'
+    assert cfg.pkcs11_cert_pin == '5678'
+    assert cfg.check_client_cert is True
+
+
+def test_tls_config_pkcs11_from_dict_identity_cert_file():
+    cfg = TLSConfig.from_dict(section='server', config={
+        'connector': 'pkcs11',
+        'ca_cert': '/ignored.pem',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert_file': '/path/to/identity/cert.pem',
+        },
+    })
+    assert cfg.cert_file == '/path/to/identity/cert.pem'
+    assert cfg.ca_cert == 'system'
+
+
+def test_tls_config_file_rejects_pkcs11_nest():
+    with pytest.raises(ConfigurationError, match='connector=file cannot set pkcs11'):
+        TLSConfig.from_dict({
+            'connector': 'file',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_rejects_schannel_nest():
+    with pytest.raises(ConfigurationError, match='cannot be combined with a schannel nest'):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+            'schannel': {'identity_cert_name': 'host'},
+        })
+
+
+def test_tls_config_schannel_from_dict_nested():
+    cfg = TLSConfig.from_dict(section='server', config={
+        'connector': 'schannel',
+        'schannel': {
+            'identity_cert_name': 'host.example.com',
+            'identity_cert_store': 'my',
+        },
+    })
+    assert cfg.schannel_cert_name == 'host.example.com'
+    assert cfg.schannel_cert_store == 'MY'
+    assert cfg.check_client_cert is True
+    assert cfg.check_server_cert is True
+
+
+def test_tls_config_empty_nests_with_file_ok():
+    cfg = TLSConfig.from_dict({
+        'connector': 'file',
+        'pkcs11': {'module_path': None, 'identity_key': {'uri': None}},
+        'schannel': {'identity_cert_name': None},
+    })
+    assert cfg.connector == 'file'
+
+
+def test_tls_config_file_rejects_system_context_options():
+    with pytest.raises(ConfigurationError, match="must be a list of option names"):
+        TLSConfig.from_dict({'context_options': 'system'})
+
+
+def test_tls_config_context_options_list():
+    cfg = TLSConfig.from_dict({'context_options': ['NO_SSLv3', 'NO_TLSv1']})
+    assert cfg.context_options == ['NO_SSLv3', 'NO_TLSv1']
+
+
+def test_tls_config_context_options_none():
+    cfg = TLSConfig(context_options=None)
+    assert cfg.context_options == list(PYTHON_SSL_DEFAULT_CONTEXT_OPTIONS)
+
+
+def test_tls_config_context_options_invalid_string():
+    with pytest.raises(ConfigurationError, match="must be a list of option names"):
+        TLSConfig(context_options='NO_SSLv3')
+
+
+def test_tls_config_context_options_system_in_list():
+    with pytest.raises(ConfigurationError, match="cannot set 'system' inside"):
+        TLSConfig(context_options=['system', 'NO_SSLv3'])
+
+
+def test_tls_config_context_options_wrong_type():
+    with pytest.raises(ConfigurationError, match="must be a list of option names"):
+        TLSConfig(context_options={'NO_SSLv3': True})
+
+
+def test_tls_config_file_rejects_system_ca_cert():
+    with pytest.raises(ConfigurationError, match='does not support ca_cert: system'):
+        TLSConfig(ca_cert='system')
+
+
+def test_tls_config_cert_thumbprint_normalized():
+    tls = TLSConfig(schannel_cert_thumbprint='aa:bb cc-dd', connector='schannel')
+    assert tls.schannel_cert_thumbprint == 'AABBCCDD'
+    assert tls.schannel_cert_store == 'MY'
+    tls2 = TLSConfig(schannel_cert_thumbprint='ABCD', schannel_cert_store='my', connector='schannel')
+    assert tls2.schannel_cert_store == 'MY'
+    tls_pem = TLSConfig()
+    assert tls_pem.schannel_cert_thumbprint is None
+    assert tls_pem.schannel_cert_store is None
+
+
+def test_tls_config_cert_name_defaults_store():
+    tls = TLSConfig(schannel_cert_name=' host.example.com ', connector='schannel')
+    assert tls.schannel_cert_name == 'host.example.com'
+    assert tls.schannel_cert_store == 'MY'
+
+
+def test_tls_config_pkcs11_fields_stripped():
+    tls = TLSConfig(
+        connector='pkcs11',
+        pkcs11_module=' /m.so ',
+        pkcs11_key_uri=' pkcs11:x ',
+        pkcs11_cert_uri=' pkcs11:cert ',
+        pkcs11_key_pin=' 12 ',
+    )
+    assert tls.backend == 'python_ssl'
+    assert tls.pkcs11_module == '/m.so'
+    assert tls.pkcs11_key_uri == 'pkcs11:x'
+    assert tls.pkcs11_key_pin == '12'
+
+
+def test_tls_config_connector_normalized():
+    assert TLSConfig(connector=' FILE ').connector == 'file'
+    assert TLSConfig(connector=None).connector == 'file'
+    assert TLSConfig(connector='  ').connector == 'file'
+
+
+def test_tls_config_schannel_ignores_cipher_suite():
+    tls = TLSConfig(connector='schannel', schannel_cert_name='host', cipher_suite='ECDH+AESGCM')
+    assert tls.cipher_suite is None
+
+
+def test_tls_config_schannel_forces_mtls():
+    import agent.config as agent_config
+    tls = TLSConfig(
+        connector='schannel',
+        schannel_cert_name='host',
+        check_client_cert=False,
+        check_server_cert=False,
+    )
+    assert tls.check_client_cert is True
+    assert tls.check_server_cert is True
+    agent_config.startup_log.assert_any_call(
+        'Forcing mTLS for connector=schannel (overriding check_client_cert, check_server_cert)',
+        prefix='[WARNING]',
+    )
+
+
+def test_tls_config_pkcs11_forces_mtls():
+    import agent.config as agent_config
+    tls = TLSConfig.from_dict(section='server', config={
+        'connector': 'pkcs11',
+        'check_client_cert': False,
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    })
+    assert tls.check_client_cert is True
+    assert tls.check_server_cert is True
+    agent_config.startup_log.assert_any_call(
+        'Forcing mTLS for connector=pkcs11 (overriding check_client_cert)',
+        prefix='[WARNING]',
+    )
+
+
+_SERVER_ALLOWED_HOSTS_DEFAULT = object()
+
+
+def _server_config_dict(tls: dict, allowed_hosts=_SERVER_ALLOWED_HOSTS_DEFAULT, tls_enabled=True):
+    if allowed_hosts is _SERVER_ALLOWED_HOSTS_DEFAULT:
+        allowed_hosts = ['1.2.3.4']
+    return {
+        'allowed_hosts': allowed_hosts,
+        'max_queued_connections': 10,
+        'max_active_connections': 12,
+        'port': 9876,
+        'tls_enabled': tls_enabled,
+        'tls_handshake_timeout': 60,
+        'tls': tls,
+        'max_request_time': 99,
+        'receive_data_timeout': 30,
+        'housekeeping_interval': 1800,
+        'allow_multi_packet_response': True,
+    }
+
+
+def test_server_config_schannel_null_allowed_hosts_becomes_empty():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'schannel',
+        'schannel': {'identity_cert_name': 'host'},
+    }, allowed_hosts=None))
+    assert cfg.allowed_hosts == []
+    agent_config.startup_log.assert_any_call(
+        'Forcing allowed_hosts to [] for connector=schannel',
+        prefix='[WARNING]',
+    )
+
+
+def test_server_config_pkcs11_null_allowed_hosts_becomes_empty():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    }, allowed_hosts=None))
+    assert cfg.allowed_hosts == []
+    agent_config.startup_log.assert_any_call(
+        'Forcing allowed_hosts to [] for connector=pkcs11',
+        prefix='[WARNING]',
+    )
+
+
+def test_server_config_pkcs11_keeps_empty_allowed_hosts():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    }, allowed_hosts=[]))
+    assert cfg.allowed_hosts == []
+    messages = [call.args[0] for call in agent_config.startup_log.call_args_list]
+    assert not any(message.startswith('Forcing allowed_hosts') for message in messages)
+
+
+def test_server_config_schannel_keeps_allowed_hosts():
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'schannel',
+        'schannel': {'identity_cert_name': 'host'},
+    }, allowed_hosts=['opsview.example']))
+    assert cfg.allowed_hosts == ['opsview.example']
+
+
+def test_server_config_pkcs11_keeps_allowed_hosts():
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    }, allowed_hosts=['opsview.example']))
+    assert cfg.allowed_hosts == ['opsview.example']
+
+
+def test_server_config_file_connector_keeps_allowed_hosts():
+    cfg = ServerConfig.from_dict(_server_config_dict({'connector': 'file'}, allowed_hosts=['10.0.0.1']))
+    assert cfg.allowed_hosts == ['10.0.0.1']
+
+
+def test_server_config_file_connector_keeps_null_allowed_hosts():
+    cfg = ServerConfig.from_dict(_server_config_dict({'connector': 'file'}, allowed_hosts=None))
+    assert cfg.allowed_hosts is None
+
+
+def test_server_config_schannel_forces_tls_enabled():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'schannel',
+        'schannel': {'identity_cert_name': 'host'},
+    }, allowed_hosts=[], tls_enabled=False))
+    assert cfg.tls_enabled is True
+    agent_config.startup_log.assert_any_call(
+        'Forcing tls_enabled for connector=schannel',
+        prefix='[WARNING]',
+    )
+
+
+def test_server_config_pkcs11_forces_tls_enabled():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    }, allowed_hosts=[], tls_enabled=False))
+    assert cfg.tls_enabled is True
+    agent_config.startup_log.assert_any_call(
+        'Forcing tls_enabled for connector=pkcs11',
+        prefix='[WARNING]',
+    )
+
+
+def test_server_config_pkcs11_tls_enabled_is_silent():
+    import agent.config as agent_config
+    cfg = ServerConfig.from_dict(_server_config_dict({
+        'connector': 'pkcs11',
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    }, allowed_hosts=[]))
+    assert cfg.tls_enabled is True
+    messages = [call.args[0] for call in agent_config.startup_log.call_args_list]
+    assert not any(message.startswith('Forcing tls_enabled') for message in messages)
+
+
+def test_tls_config_pkcs11_rejected_outside_server():
+    with pytest.raises(ConfigurationError, match='only supported under server.tls'):
+        TLSConfig.from_dict({'connector': 'pkcs11'})
+
+
+def test_tls_config_schannel_rejected_outside_server():
+    with pytest.raises(ConfigurationError, match='only supported under server.tls'):
+        TLSConfig.from_dict({'connector': 'schannel'})
+
+
+@pytest.mark.parametrize('section', ['cachemanager', 'forwarders'])
+@pytest.mark.parametrize('connector', ['pkcs11', 'schannel'])
+def test_tls_config_token_connector_rejected_for_section(section, connector):
+    with pytest.raises(
+        ConfigurationError,
+        match=f'connector={connector} is only supported under server.tls \\(rejected in {section}.tls\\)',
+    ):
+        TLSConfig.from_dict({'connector': connector}, section=section)
+
+
+@pytest.mark.parametrize('tls_enabled', [True, False])
+def test_cachemanager_rejects_pkcs11_and_schannel(tls_enabled):
+    base = {
+        'host': '127.0.0.1',
+        'port': 8184,
+        'housekeeping_interval': 60,
+        'timestamp_error_margin': 30,
+        'max_cache_size': '1GB',
+        'max_item_size': 0,
+        'tls_enabled': tls_enabled,
+    }
+    for connector in ('pkcs11', 'schannel'):
+        with pytest.raises(ConfigurationError, match='rejected in cachemanager.tls'):
+            CacheManagerConfig.from_dict({**base, 'tls': {'connector': connector}})
+
+
+def test_cachemanager_tls_enabled_without_tls_block():
+    cfg = CacheManagerConfig.from_dict({
+        'host': '127.0.0.1',
+        'port': 8184,
+        'housekeeping_interval': 60,
+        'timestamp_error_margin': 30,
+        'max_cache_size': '1GB',
+        'max_item_size': 0,
+        'tls_enabled': True,
+    })
+    assert cfg.tls.connector == 'file'
+
+
+def test_cachemanager_disabled_file_tls_is_not_kept():
+    cfg = CacheManagerConfig.from_dict({
+        'host': '127.0.0.1',
+        'port': 8184,
+        'housekeeping_interval': 60,
+        'timestamp_error_margin': 30,
+        'max_cache_size': '1GB',
+        'max_item_size': 0,
+        'tls_enabled': False,
+        'tls': {'connector': 'file', 'ca_cert': 'ca.pem'},
+    })
+    assert cfg.tls is None
+
+
+def test_cachemanager_file_connector_ok():
+    cfg = CacheManagerConfig.from_dict({
+        'host': '127.0.0.1',
+        'port': 8184,
+        'housekeeping_interval': 60,
+        'timestamp_error_margin': 30,
+        'max_cache_size': '1GB',
+        'max_item_size': 0,
+        'tls_enabled': True,
+        'tls': {'connector': 'file', 'cert_file': 'cert.pem', 'key_file': 'key.pem'},
+    })
+    assert cfg.tls.connector == 'file'
+    assert cfg.tls.cert_file == 'cert.pem'
+
+
+@pytest.mark.parametrize('tls_enabled', [True, False])
+def test_forwarder_rejects_pkcs11_and_schannel(tls_enabled):
+    for connector in ('pkcs11', 'schannel'):
+        with pytest.raises(ConfigurationError, match='rejected in forwarders.tls'):
+            ForwarderClientConfig(
+                host='host', port=99, tls_enabled=tls_enabled, tls={'connector': connector},
+            )
+
+
+def test_forwarder_file_connector_ok():
+    cfg = ForwarderClientConfig(
+        host='host',
+        port=99,
+        tls_enabled=True,
+        tls={'connector': 'file', 'ca_cert': 'ca.pem'},
+    )
+    assert cfg.tls.connector == 'file'
+    assert cfg.tls.ca_cert == 'ca.pem'
+
+
+def test_server_config_file_connector_keeps_tls_disabled():
+    cfg = ServerConfig.from_dict(_server_config_dict(
+        {'connector': 'file'}, allowed_hosts=[], tls_enabled=False,
+    ))
+    assert cfg.tls_enabled is False
+
+
+def test_tls_config_schannel_requires_identity():
+    with pytest.raises(ConfigurationError, match='identity_cert_name'):
+        TLSConfig(connector='schannel')
+    with pytest.raises(ConfigurationError, match='identity_cert_name'):
+        TLSConfig(connector='schannel', schannel_cert_store='MY')
+
+
+def test_tls_config_schannel_rejects_both_identities():
+    with pytest.raises(ConfigurationError, match='only one Schannel identity'):
+        TLSConfig(connector='schannel', schannel_cert_name='host', schannel_cert_thumbprint='AABB')
+
+
+def test_tls_config_schannel_store_with_identity_uppercased():
+    tls = TLSConfig(connector='schannel', schannel_cert_name='host', schannel_cert_store='my')
+    assert tls.schannel_cert_store == 'MY'
+
+
+def test_tls_config_schannel_defaults_store_to_my():
+    tls = TLSConfig(connector='schannel', schannel_cert_name='host')
+    assert tls.schannel_cert_store == 'MY'
+
+
+def test_tls_config_file_rejects_cert_store():
+    with pytest.raises(ConfigurationError, match='identity_cert_store requires'):
+        TLSConfig(schannel_cert_store='my')
+
+
+def test_tls_config_file_rejects_schannel_identity():
+    with pytest.raises(ConfigurationError, match='require server.tls.connector=schannel'):
+        TLSConfig(schannel_cert_name='host.example.com')
+
+
+def test_tls_config_rejects_python_ssl_connector():
+    with pytest.raises(ConfigurationError, match='Invalid TLS connector'):
+        TLSConfig(connector='python_ssl')
+
+
+def test_tls_config_file_applies_defaults():
+    tls = TLSConfig()
+    assert tls.connector == 'file'
+    assert tls.backend == 'python_ssl'
+    assert tls.cipher_suite == PYTHON_SSL_DEFAULT_CIPHER_SUITE
+    assert tls.context_options == list(PYTHON_SSL_DEFAULT_CONTEXT_OPTIONS)
+
+
+def test_tls_config_file_rejects_system_cipher_suite():
+    with pytest.raises(ConfigurationError, match='does not support cipher_suite: system'):
+        TLSConfig(cipher_suite='system')
+
+
+def test_tls_config_pkcs11_nest_must_be_mapping():
+    with pytest.raises(ConfigurationError, match="'pkcs11' must be a mapping"):
+        TLSConfig.from_dict({'pkcs11': 'token.so'})
+
+
+def test_tls_config_schannel_nest_must_be_mapping():
+    with pytest.raises(ConfigurationError, match="'schannel' must be a mapping"):
+        TLSConfig.from_dict({'schannel': 'MY'})
+
+
+def test_tls_config_rejects_unknown_pkcs11_nest_key():
+    with pytest.raises(ConfigurationError, match="Unexpected configuration in 'tls.pkcs11': 'slot'"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {'slot': 1},
+        })
+
+
+def test_tls_config_rejects_unknown_schannel_nest_key():
+    with pytest.raises(ConfigurationError, match="Unexpected configuration in 'tls.schannel': 'slot'"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'schannel',
+            'schannel': {'slot': 1},
+        })
+
+
+def test_tls_config_file_rejects_schannel_nest():
+    with pytest.raises(ConfigurationError, match='connector=file cannot set schannel'):
+        TLSConfig.from_dict({
+            'connector': 'file',
+            'schannel': {'identity_cert_name': 'host'},
+        })
+
+
+def test_tls_config_file_rejects_both_unused_nests():
+    with pytest.raises(ConfigurationError, match='cannot set pkcs11 or schannel'):
+        TLSConfig.from_dict({
+            'connector': 'file',
+            'pkcs11': {'module_path': '/m.so'},
+            'schannel': {'identity_cert_name': 'host'},
+        })
+
+
+def test_tls_config_schannel_rejects_pkcs11_nest():
+    with pytest.raises(ConfigurationError, match='cannot be combined with a pkcs11 nest'):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'schannel',
+            'schannel': {'identity_cert_name': 'host'},
+            'pkcs11': {'module_path': '/m.so'},
+        })
+
+
+def test_tls_config_pkcs11_from_dict_warns_leftover_context_options(monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        'agent.config.startup_log',
+        lambda message, prefix='[INFO]': messages.append(f'{prefix} {message}'),
+    )
+    cfg = TLSConfig.from_dict(section='server', config={
+        'connector': 'pkcs11',
+        'context_options': ['NO_SSLv3'],
+        'pkcs11': {
+            'module_path': 'token.so',
+            'identity_key': {'uri': 'pkcs11:object=key'},
+            'identity_cert': {'uri': 'pkcs11:object=cert'},
+        },
+    })
+    assert cfg.context_options == 'system'
+    assert any(
+        line.startswith('[WARNING] Ignoring leftover TLS file options') and 'context_options' in line
+        for line in messages
+    )
+
+
+def test_tls_config_pkcs11_constructor_clears_leftover_context_options():
+    cfg = TLSConfig(
+        connector='pkcs11',
+        context_options=['NO_SSLv3'],
+        pkcs11_module='token.so',
+        pkcs11_key_uri='pkcs11:object=key',
+        pkcs11_cert_uri='pkcs11:object=cert',
+    )
+    assert cfg.context_options == 'system'
+
+
+def test_tls_config_pkcs11_identity_key_must_be_mapping():
+    with pytest.raises(ConfigurationError, match="'pkcs11.identity_key' must be a mapping"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': 'pkcs11:object=key',
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_identity_key_rejects_extra_key():
+    with pytest.raises(ConfigurationError, match="'tls.pkcs11.identity_key': 'label'"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key', 'label': 'x'},
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_identity_cert_must_be_mapping():
+    with pytest.raises(ConfigurationError, match="'pkcs11.identity_cert' must be a mapping"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+                'identity_cert': 'pkcs11:object=cert',
+            },
+        })
+
+
+def test_tls_config_pkcs11_identity_cert_rejects_extra_key():
+    with pytest.raises(ConfigurationError, match="'tls.pkcs11.identity_cert': 'label'"):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_key': {'uri': 'pkcs11:object=key'},
+                'identity_cert': {'uri': 'pkcs11:object=cert', 'label': 'x'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_missing_identity_key_requires_uri():
+    with pytest.raises(ConfigurationError, match='identity_key.uri'):
+        TLSConfig.from_dict(section='server', config={
+            'connector': 'pkcs11',
+            'pkcs11': {
+                'module_path': 'token.so',
+                'identity_cert': {'uri': 'pkcs11:object=cert'},
+            },
+        })
+
+
+def test_tls_config_pkcs11_requires_cert_source():
+    with pytest.raises(ConfigurationError, match='identity_cert or pkcs11.identity_cert_file'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+        )
+
+
+def test_tls_config_pkcs11_requires_key_uri():
+    with pytest.raises(ConfigurationError, match='identity_key.uri'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_cert_uri='pkcs11:object=cert',
+        )
+
+
+def test_tls_config_pkcs11_cert_uri_scheme():
+    with pytest.raises(ConfigurationError, match="identity_cert.uri' must start with 'pkcs11:'"):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='file:/tmp/cert.pem',
+        )
+
+
+def test_tls_config_file_rejects_pkcs11_identity_fields():
+    with pytest.raises(ConfigurationError, match='require server.tls.connector=pkcs11'):
+        TLSConfig(pkcs11_module='token.so')
+
+
+def test_tls_config_pkcs11_rejects_schannel_fields():
+    with pytest.raises(ConfigurationError, match='cannot be combined with schannel settings'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='pkcs11:object=cert',
+            schannel_cert_name='host',
+        )
+
+
+def test_tls_config_pkcs11_rejects_cert_store():
+    with pytest.raises(ConfigurationError, match='schannel settings'):
+        TLSConfig(
+            connector='pkcs11',
+            pkcs11_module='token.so',
+            pkcs11_key_uri='pkcs11:object=key',
+            pkcs11_cert_uri='pkcs11:object=cert',
+            schannel_cert_store='MY',
+        )
+
+
+def test_tls_config_from_dict_reraises_other_type_error(monkeypatch):
+    def boom(self, *args, **kwargs):
+        raise TypeError('unrelated construction failure')
+
+    monkeypatch.setattr(TLSConfig, '__init__', boom)
+    with pytest.raises(TypeError, match='unrelated construction failure'):
+        TLSConfig.from_dict({})
+
+
+def test_tls_config_from_dict_maps_missing_init_argument(monkeypatch):
+    def boom(self, *args, **kwargs):
+        raise TypeError("__init__() missing 1 required positional argument: 'ca_cert'")
+
+    monkeypatch.setattr(TLSConfig, '__init__', boom)
+    with pytest.raises(ConfigurationError, match="Configuration missing from 'tls'"):
+        TLSConfig.from_dict({})
+
+
+def test_file_key_configured_non_string_leftover():
+    cfg = TLSConfig(
+        connector='pkcs11',
+        cipher_suite=1,
+        pkcs11_module='token.so',
+        pkcs11_key_uri='pkcs11:object=key',
+        pkcs11_cert_uri='pkcs11:object=cert',
+    )
+    assert cfg.cipher_suite == 'system'

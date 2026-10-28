@@ -27,6 +27,11 @@ EXECUTABLE_CONFIG = {
 
 build_exe_options = {
     'excludes': ['asyncio', 'unittest', 'tkinter', 'test', 'mock'],
+    # Force-include the whole tls package: backends are imported lazily inside
+    # create_tls_server (schannel / python_ssl), so
+    # cx_Freeze import tracing from main.py may omit them. Without this, a
+    # frozen agent can start and then ImportError when NRPE enables TLS.
+    'packages': ['tls'],
 }
 
 if TOX:
@@ -42,7 +47,9 @@ elif sys.platform.startswith('win32'):
         "include_files": ["icon.ico"],
         "includes": ["win_svce_handler"],
         # pywin32 packages required by cx_Freeze "service" base for --install/--uninstall and service runtime
-        "packages": ["win32serviceutil", "win32service", "win32event", "servicemanager", "win32timezone"],
+        "packages": build_exe_options['packages'] + [
+            "win32serviceutil", "win32service", "win32event", "servicemanager", "win32timezone",
+        ],
         # Not setting include_msvcr as we bundle the eventual MSI with the Visual C++ redistributable installer
     }
 else:

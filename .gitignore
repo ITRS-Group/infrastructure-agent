@@ -6,10 +6,11 @@ build
 cfg/agent.default.yml
 cfg/custom
 cfg/imported.yml
+cfg/lab-mtls/
 infrastructure-agent
 infrastructure-agent.service
 infrastructure-agent.tar.gz
-infrastructure_agent.egg-info
+*.egg-info
 nulc
 VERSION
 
@@ -27,6 +28,7 @@ plugnpshell
 
 # Test Artifacts
 *.log
+*.cover
 .benchmarks
 .coverage
 .pytest_cache

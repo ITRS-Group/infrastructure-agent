@@ -16,3 +16,8 @@ for license information. When installed, this license is available in the 'licen
 
 The included WiX Theme XML is licensed separately. See 'LICENSE_WIX_THEME' for license information.
 When installed, this license is available in the 'licenses' subdirectory.
+
+On Linux, the freeze may bundle OpenSSL 3 (`bin/lib/libcrypto*.so.3` and `bin/lib/libssl*.so.3`)
+and the OpenSSL 3 pkcs11-provider (`bin/lib/ossl-modules/pkcs11.so`).
+Both are licensed under the Apache License 2.0. See 'LICENSE_APACHE-2.0'.
+When installed, that license is copied to the 'licenses' subdirectory.

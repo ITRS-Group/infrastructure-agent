@@ -5,6 +5,7 @@ Copyright (C) 2003-2026 ITRS Group Ltd. All rights reserved
 
 from __future__ import annotations
 
+import copy
 import logging
 import logging.config
 from typing import TYPE_CHECKING
@@ -47,7 +48,7 @@ BASE_LOGGING_CONFIG_DICT = {
 }
 
 # Names of the loggers to be created. These map to directories/files under src/
-PROJECT_LOGGERS = ('main', 'agent', 'cache', 'nrpe')
+PROJECT_LOGGERS = ('main', 'agent', 'cache', 'nrpe', 'tls')
 
 # Default configuration for loggers under BASE_LOGGING_CONFIG_DICT.loggers
 BASE_LOGGER_CONFIG = {
@@ -86,27 +87,32 @@ def init_logging(config: dict):
     * Passing the dictionary to logging.config.dictConfig to configure the logging module
     * Creating and setting the logger for this file (logger.py)
     """
-    new_config = BASE_LOGGING_CONFIG_DICT
+    new_config = copy.deepcopy(BASE_LOGGING_CONFIG_DICT)
     requested_handlers = config.get('handlers', {}) or {}
+    logger_handlers = list(BASE_LOGGER_CONFIG['handlers'])
 
     for handler_name in requested_handlers:
         try:
             # Populate our default config with default handler definitions based on name
             # We always use the console handler to print to stdout, but we don't always
             # want syslog or file depending on the OS
-            new_config['handlers'][handler_name] = HANDLERS[handler_name]
-            BASE_LOGGER_CONFIG['handlers'].append(handler_name)
+            new_config['handlers'][handler_name] = copy.deepcopy(HANDLERS[handler_name])
+            logger_handlers.append(handler_name)
         except KeyError:
             raise ConfigurationError(
                 f"'{handler_name}' is an invalid logging handler (choices = {', '.join(HANDLERS.keys())})"
             )
 
+    logger_config = BASE_LOGGER_CONFIG.copy()
+    logger_config['handlers'] = logger_handlers
     for logger_name in PROJECT_LOGGERS:
-        new_config['loggers'][logger_name] = BASE_LOGGER_CONFIG.copy()
+        new_config['loggers'][logger_name] = logger_config.copy()
 
     merge_dictionary(new_config, config)
 
-    logging.root.manager.loggerDict = {}
+    # dictConfig updates loggers that already exist. Clearing loggerDict would
+    # detach module loggers created by imports that run before configuration,
+    # so their records would no longer reach the configured handlers.
     for section in ('loggers', 'handlers', 'formatters'):
         if new_config[section] is None:
             raise ConfigurationError(f"'logging' section '{section}' is empty")

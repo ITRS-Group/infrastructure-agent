@@ -365,6 +365,7 @@ def test_scriptrunner_run_script_with_poller(
         stderr=mocker.ANY,
         shell=mocker.ANY,
         preexec_fn=mocker.ANY,
+        cwd='/',
     )
     if poller_fn:
         poller_fn.assert_called_with(script_name)
@@ -503,7 +504,8 @@ def test_scriptrunner_stdin_pipe(agent_config, mocker, scriptrunner, execution_s
     mock_popen.return_value = mocker.Mock()
     scriptrunner.run_script(command, ['arg1'])
     mock_popen.assert_called_with(
-        mocker.ANY, env=mocker.ANY, stdin=expected_stdin, stdout=-1, stderr=-1, shell=False, preexec_fn=mocker.ANY
+        mocker.ANY, env=mocker.ANY, stdin=expected_stdin, stdout=-1, stderr=-1, shell=False,
+        preexec_fn=mocker.ANY, cwd='/',
     )
 
 

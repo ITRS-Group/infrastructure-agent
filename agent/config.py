@@ -46,6 +46,7 @@ VERSION_FILE_NAME = 'version'
 
 PLUGIN_ARG_FORMAT_RE = re.compile(r'\$ARG(\d+)\$')
 ESCAPE_PATH_STRINGS = ('{', '}')
+TLS_SYSTEM_SENTINEL = 'system'
 
 DEFAULT_USER_CONFIG_CONTENT = """---
 # This file has been created as a placeholder for your custom
@@ -105,7 +106,7 @@ class AbstractConfig:
                 raise ConfigurationError(f"Configuration missing from '{cls.NAME}': {match.group(1)}")
 
             # __init__() got an unexpected keyword argument 'foo'
-            match = re.match(r".*__init__\(\) got an unexpected .* '(.*)'$", str(ex))
+            match = re.search(r"unexpected keyword argument '([^']+)'", str(ex))
             if match:
                 raise ConfigurationError(f"Unexpected configuration in '{cls.NAME}': '{match.group(1)}'")
 
@@ -315,10 +316,56 @@ class CommandConfig(AbstractConfig):
         return commands
 
 
+# Default python_ssl TLS policy (applied when connector is file).
+PYTHON_SSL_DEFAULT_CIPHER_SUITE = 'ECDH+AESGCM:ECDH+AES256:ECDH+AES128:!aNULL:!MD5:!DSS'
+PYTHON_SSL_DEFAULT_CONTEXT_OPTIONS = ('NO_SSLv3', 'NO_TLSv1', 'NO_TLSv1_1')
+_PKCS11_NEST_KEYS = {'module_path', 'identity_cert', 'identity_cert_file', 'identity_key'}
+_PKCS11_URI_NEST_KEYS = {'uri', 'pin'}
+_SCHANNEL_NEST_KEYS = {
+    'identity_cert_name',
+    'identity_cert_thumbprint',
+    'identity_cert_store',
+}
+
+
+def _strip_optional_str(value) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _strip_optional_secret(value, field: str) -> Optional[str]:
+    """Return a stripped secret. Reject YAML numbers/bools (quote the value, e.g. pin: "0123")."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigurationError(f"TLS config '{field}' must be a string")
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _file_key_configured(tls_config: 'TLSConfig', key: str) -> bool:
+    value = getattr(tls_config, key, None)
+    if key == 'context_options':
+        if value is None or value == []:
+            return False
+        return True
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
 @dataclasses.dataclass
 class TLSConfig(AbstractConfig):
     """
     Class to store TLS configuration.
+
+    ``connector`` defaults to file (PEM paths, optional encrypted PKCS#8
+    ``key_passphrase``). pkcs11 uses a token identity; schannel uses the
+    Windows cert store. PKCS#12 archives are not supported.
     """
     ca_cert: Optional[str] = None
     ca_path: Optional[str] = None
@@ -327,11 +374,275 @@ class TLSConfig(AbstractConfig):
     check_client_cert: bool = True
     check_server_cert: bool = True
     cipher_suite: Optional[str] = None
-    context_options: list[str] = dataclasses.field(default_factory=list)
+    # List of ssl.OP_* names (without OP_), or the sentinel string 'system'.
+    context_options: str | list[str] = dataclasses.field(default_factory=list)
+    # Windows Schannel: Prefer FriendlyName over SimpleName so shared Subject
+    # CNs remain selectable; thumbprint when the store label is ambiguous.
+    # schannel_cert_store defaults to MY when a Schannel identity is set.
+    schannel_cert_name: Optional[str] = None
+    schannel_cert_thumbprint: Optional[str] = None
+    schannel_cert_store: Optional[str] = None
+    pkcs11_module: Optional[str] = None
+    pkcs11_key_uri: Optional[str] = None
+    pkcs11_key_pin: Optional[str] = dataclasses.field(default=None, repr=False)
+    pkcs11_cert_uri: Optional[str] = None
+    pkcs11_cert_pin: Optional[str] = dataclasses.field(default=None, repr=False)
+    connector: str = 'file'
+    key_passphrase: Optional[str] = dataclasses.field(default=None, repr=False)
 
     log_all_messages: bool = read_bool_from_envar('AGENT_TLS_LOG_MESSAGES')
 
     NAME: str = dataclasses.field(default='tls', repr=False)
+
+    @property
+    def backend(self) -> str:
+        from tls.transport.capabilities import (
+            normalize_connector,
+            transport_backend_for_connector,
+        )
+
+        connector = normalize_connector(self.connector) or 'file'
+        return transport_backend_for_connector(connector)
+
+    @classmethod
+    def from_dict(cls, config: dict, *, section: str | None = None):
+        """Build TLSConfig from YAML, flattening connector-specific nests.
+
+        ``section`` is the parent block (``server``, ``cachemanager``,
+        ``forwarders``). ``pkcs11`` and ``schannel`` are only valid under
+        ``server``.
+        """
+        from tls.transport.capabilities import normalize_connector, yaml_value_set
+
+        raw = dict(config or {})
+        pkcs11_nest = raw.pop('pkcs11', None)
+        schannel_nest = raw.pop('schannel', None)
+        if pkcs11_nest is None:
+            pkcs11_nest = {}
+        elif not isinstance(pkcs11_nest, dict):
+            raise ConfigurationError("TLS config 'pkcs11' must be a mapping")
+        if schannel_nest is None:
+            schannel_nest = {}
+        elif not isinstance(schannel_nest, dict):
+            raise ConfigurationError("TLS config 'schannel' must be a mapping")
+
+        extra_pkcs11 = set(pkcs11_nest) - _PKCS11_NEST_KEYS
+        if extra_pkcs11:
+            unexpected = sorted(extra_pkcs11)[0]
+            raise ConfigurationError(
+                f"Unexpected configuration in 'tls.pkcs11': '{unexpected}'"
+            )
+        extra_schannel = set(schannel_nest) - _SCHANNEL_NEST_KEYS
+        if extra_schannel:
+            unexpected = sorted(extra_schannel)[0]
+            raise ConfigurationError(
+                f"Unexpected configuration in 'tls.schannel': '{unexpected}'"
+            )
+
+        connector = normalize_connector(raw.get('connector')) or 'file'
+        if connector in ('pkcs11', 'schannel') and section != 'server':
+            where = f"{section}.tls" if section else 'tls'
+            raise ConfigurationError(
+                f"TLS connector={connector} is only supported under server.tls "
+                f"(rejected in {where})."
+            )
+        pkcs11_set = yaml_value_set(pkcs11_nest)
+        schannel_set = yaml_value_set(schannel_nest)
+        if connector == 'file' and (pkcs11_set or schannel_set):
+            which = []
+            if pkcs11_set:
+                which.append('pkcs11')
+            if schannel_set:
+                which.append('schannel')
+            raise ConfigurationError(
+                "TLS connector=file cannot set " +
+                ' or '.join(which) +
+                " (use connector=pkcs11 or connector=schannel)."
+            )
+        if connector == 'pkcs11' and schannel_set:
+            raise ConfigurationError(
+                "TLS connector=pkcs11 cannot be combined with a schannel nest."
+            )
+        if connector == 'schannel' and pkcs11_set:
+            raise ConfigurationError(
+                "TLS connector=schannel cannot be combined with a pkcs11 nest."
+            )
+
+        if connector == 'pkcs11':
+            cls._flatten_pkcs11_nest(raw, pkcs11_nest)
+        elif connector == 'schannel':
+            cls._flatten_schannel_nest(raw, schannel_nest)
+
+        try:
+            return cls(**raw)
+        except TypeError as ex:
+            match = re.search(r"unexpected keyword argument '([^']+)'", str(ex))
+            if match:
+                raise ConfigurationError(
+                    f"Unexpected configuration in '{cls.NAME}': '{match.group(1)}'"
+                )
+            match = re.match(r'.*__init__\(\) missing .*: (.*)$', str(ex))
+            if match:
+                raise ConfigurationError(
+                    f"Configuration missing from '{cls.NAME}': {match.group(1)}"
+                )
+            raise
+
+    @staticmethod
+    def _flatten_pkcs11_nest(raw: dict, nest: dict) -> None:
+        raw['pkcs11_module'] = nest.get('module_path')
+        identity_key = nest.get('identity_key')
+        if identity_key is None:
+            identity_key = {}
+        elif not isinstance(identity_key, dict):
+            raise ConfigurationError("TLS config 'pkcs11.identity_key' must be a mapping")
+        extra = set(identity_key) - _PKCS11_URI_NEST_KEYS
+        if extra:
+            unexpected = sorted(extra)[0]
+            raise ConfigurationError(
+                f"Unexpected configuration in 'tls.pkcs11.identity_key': '{unexpected}'"
+            )
+        raw['pkcs11_key_uri'] = identity_key.get('uri')
+        raw['pkcs11_key_pin'] = identity_key.get('pin')
+        identity_cert = nest.get('identity_cert')
+        identity_cert_file = nest.get('identity_cert_file')
+        if identity_cert is not None and not isinstance(identity_cert, dict):
+            raise ConfigurationError("TLS config 'pkcs11.identity_cert' must be a mapping")
+        if identity_cert:
+            extra = set(identity_cert) - _PKCS11_URI_NEST_KEYS
+            if extra:
+                unexpected = sorted(extra)[0]
+                raise ConfigurationError(
+                    f"Unexpected configuration in 'tls.pkcs11.identity_cert': '{unexpected}'"
+                )
+            raw['pkcs11_cert_uri'] = identity_cert.get('uri')
+            raw['pkcs11_cert_pin'] = identity_cert.get('pin')
+            # Token cert replaces a leftover top-level cert_file; identity_cert_file
+            # still wins below so xor validation can reject both sources.
+            raw['cert_file'] = None
+        if identity_cert_file:
+            raw['cert_file'] = identity_cert_file
+
+    @staticmethod
+    def _flatten_schannel_nest(raw: dict, nest: dict) -> None:
+        raw['schannel_cert_name'] = nest.get('identity_cert_name')
+        raw['schannel_cert_thumbprint'] = nest.get('identity_cert_thumbprint')
+        raw['schannel_cert_store'] = nest.get('identity_cert_store')
+
+    def __post_init__(self):
+        from tls.transport.capabilities import validate_identity_keys, normalize_connector
+
+        self.connector = normalize_connector(self.connector) or 'file'
+        self.schannel_cert_name = _strip_optional_str(self.schannel_cert_name)
+        if self.schannel_cert_thumbprint:
+            cleaned = str(self.schannel_cert_thumbprint).replace(' ', '').replace(':', '').replace('-', '')
+            self.schannel_cert_thumbprint = cleaned.upper()
+        self.pkcs11_key_pin = _strip_optional_secret(
+            self.pkcs11_key_pin, 'pkcs11.identity_key.pin'
+        )
+        self.pkcs11_cert_pin = _strip_optional_secret(
+            self.pkcs11_cert_pin, 'pkcs11.identity_cert.pin'
+        )
+        self.key_passphrase = _strip_optional_secret(
+            self.key_passphrase, 'key_passphrase'
+        )
+        for attr in (
+            'pkcs11_module',
+            'pkcs11_key_uri',
+            'pkcs11_cert_uri',
+            'ca_cert',
+            'ca_path',
+            'cert_file',
+            'key_file',
+        ):
+            setattr(self, attr, _strip_optional_str(getattr(self, attr)))
+
+        leftover = []
+        if self.connector in ('pkcs11', 'schannel'):
+            keys = [
+                'ca_cert', 'ca_path', 'key_file', 'key_passphrase', 'cipher_suite', 'context_options',
+            ]
+            if self.connector == 'schannel':
+                keys.insert(2, 'cert_file')
+            for key in keys:
+                if _file_key_configured(self, key):
+                    leftover.append(key)
+                    if key == 'context_options':
+                        self.context_options = []
+                    else:
+                        setattr(self, key, None)
+            if leftover:
+                startup_log(
+                    "Ignoring leftover TLS file options with connector="
+                    f"{self.connector}: {', '.join(leftover)}",
+                    prefix='[WARNING]',
+                )
+            mtls_overridden = []
+            if not self.check_client_cert:
+                mtls_overridden.append('check_client_cert')
+                self.check_client_cert = True
+            if not self.check_server_cert:
+                mtls_overridden.append('check_server_cert')
+                self.check_server_cert = True
+            if mtls_overridden:
+                startup_log(
+                    "Forcing mTLS for connector="
+                    f"{self.connector} (overriding {', '.join(mtls_overridden)})",
+                    prefix='[WARNING]',
+                )
+
+        if self.connector == 'pkcs11':
+            self.ca_cert = TLS_SYSTEM_SENTINEL
+            self.ca_path = None
+            self.key_file = None
+            self.key_passphrase = None
+            self.cipher_suite = TLS_SYSTEM_SENTINEL
+            self.context_options = TLS_SYSTEM_SENTINEL
+
+        if self.context_options is None:
+            self.context_options = []
+        elif isinstance(self.context_options, str):
+            if self.connector == 'file' or self.context_options != TLS_SYSTEM_SENTINEL:
+                raise ConfigurationError(
+                    "TLS config 'context_options' must be a list of option names"
+                    if self.connector == 'file'
+                    else "TLS config 'context_options' must be 'system' or a list of option names"
+                )
+        elif isinstance(self.context_options, list):
+            if 'system' in self.context_options:
+                raise ConfigurationError(
+                    "TLS config cannot set 'system' inside the 'context_options' list"
+                )
+        else:
+            raise ConfigurationError(
+                "TLS config 'context_options' must be a list of option names"
+            )
+
+        if self.connector == 'file':
+            if self.key_passphrase and not (self.cert_file or self.key_file):
+                raise ConfigurationError(
+                    "TLS config must set 'cert_file' or 'key_file' when 'key_passphrase' is configured"
+                )
+            if self.ca_cert == TLS_SYSTEM_SENTINEL:
+                raise ConfigurationError(
+                    "TLS connector=file does not support ca_cert: system"
+                )
+            if self.cipher_suite == TLS_SYSTEM_SENTINEL:
+                raise ConfigurationError(
+                    "TLS connector=file does not support cipher_suite: system"
+                )
+            if not self.cipher_suite:
+                self.cipher_suite = PYTHON_SSL_DEFAULT_CIPHER_SUITE
+            if not self.context_options:
+                self.context_options = list(PYTHON_SSL_DEFAULT_CONTEXT_OPTIONS)
+
+        validate_identity_keys(self)
+
+        if self.connector == 'schannel':
+            if self.schannel_cert_store:
+                self.schannel_cert_store = str(self.schannel_cert_store).upper()
+            else:
+                self.schannel_cert_store = 'MY'
 
 
 @dataclasses.dataclass
@@ -357,7 +668,15 @@ class CacheManagerConfig(AbstractConfig):
     def __post_init__(self):
         self.max_cache_size = parse_byte_string(self.max_cache_size) or 107374182  # 1GB
         self.max_item_size = parse_byte_string(self.max_item_size)
-        self.tls = TLSConfig.from_dict(self.tls) if self.tls_enabled else None
+        # Parse tls whenever it is present so pkcs11/schannel are rejected
+        # even when TLS is disabled. Only keep the object when TLS is on.
+        if self.tls is not None:
+            parsed = TLSConfig.from_dict(self.tls, section=self.NAME)
+            self.tls = parsed if self.tls_enabled else None
+        elif self.tls_enabled:
+            self.tls = TLSConfig.from_dict({}, section=self.NAME)
+        else:
+            self.tls = None
 
 
 @dataclasses.dataclass
@@ -442,7 +761,7 @@ class ForwarderClientConfig(AbstractConfig):
     MIN_IDLE_TIMEOUT_SECS = 4
 
     def __post_init__(self):
-        self.tls = TLSConfig.from_dict(self.tls or {})
+        self.tls = TLSConfig.from_dict(self.tls or {}, section='forwarders')
         if self.idle_timeout < self.MIN_IDLE_TIMEOUT_SECS:
             raise ConfigurationError(
                 f"Idle timeout for forwarder '{self.NAME}' must be at least {self.MIN_IDLE_TIMEOUT_SECS} seconds"
@@ -486,7 +805,22 @@ class ServerConfig(AbstractConfig):
     bind_address: str = ''
 
     def __post_init__(self):
-        self.tls = TLSConfig.from_dict(self.tls)
+        self.tls = TLSConfig.from_dict(self.tls, section=self.NAME)
+        if self.tls.connector in ('pkcs11', 'schannel'):
+            # Null/unset would block every client; treat it as an empty list
+            # (no host filter). A configured list is still applied.
+            if self.allowed_hosts is None:
+                startup_log(
+                    f"Forcing allowed_hosts to [] for connector={self.tls.connector}",
+                    prefix='[WARNING]',
+                )
+                self.allowed_hosts = []
+            if not self.tls_enabled:
+                startup_log(
+                    f"Forcing tls_enabled for connector={self.tls.connector}",
+                    prefix='[WARNING]',
+                )
+            self.tls_enabled = True
 
 
 @dataclasses.dataclass

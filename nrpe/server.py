@@ -22,7 +22,7 @@ from gevent.lock import Semaphore
 from agent.helpers import is_host_in_net_list
 from agent.objects import Result
 from agent.scriptrunner import ScriptRunner
-from agent.ssl_helper import get_ssl_context, verify_certificate
+from tls.transport import create_tls_server
 from .packet import AbstractPacket, NRPEPacketV2, NRPEPacketException
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from ssl import SSLSocket
     from typing import Optional, Type, Union, Any
     from uuid import UUID
+    from tls.transport import TlsServerTransport
 
 
 class NRPETimeout(Exception):
@@ -151,17 +152,42 @@ class NRPEListener:
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # allow quick restarts
 
         if self.server_config.tls_enabled:
-            # validate the TLS configuration and create a context
+            # validate the TLS configuration and create a transport (python ssl / Schannel / …)
+            from agent.ssl_helper import redact_pkcs11_secrets
+
+            tls_cfg = self.server_config.tls
+            logger.debug(
+                "NRPE TLS config: connector=%s schannel_cert_name=%r schannel_cert_thumbprint=%s "
+                "schannel_cert_store=%s "
+                "cert_file=%s key_file=%s ca_cert=%s ca_path=%s pkcs11_module=%s pkcs11_key_uri=%s "
+                "check_client_cert=%s",
+                getattr(tls_cfg, 'connector', None),
+                getattr(tls_cfg, 'schannel_cert_name', None),
+                getattr(tls_cfg, 'schannel_cert_thumbprint', None),
+                getattr(tls_cfg, 'schannel_cert_store', None),
+                getattr(tls_cfg, 'cert_file', None),
+                getattr(tls_cfg, 'key_file', None),
+                getattr(tls_cfg, 'ca_cert', None),
+                getattr(tls_cfg, 'ca_path', None),
+                getattr(tls_cfg, 'pkcs11_module', None),
+                redact_pkcs11_secrets(getattr(tls_cfg, 'pkcs11_key_uri', None)),
+                getattr(tls_cfg, 'check_client_cert', False),
+            )
             try:
-                self.context = get_ssl_context(self.server_config.tls, 'server')
-                if not self.platform.is_windows:
-                    verify_certificate(self.server_config.tls)
-                # log_object_attr(logging.DEBUG, self.socket, "self.socket")
+                self._tls: Optional['TlsServerTransport'] = create_tls_server(
+                    tls_cfg,
+                    self.server_config.tls_handshake_timeout,
+                    self.platform,
+                    name='NRPE',
+                    max_active_connections=self.server_config.max_active_connections,
+                )
             except Exception as ex:
-                logger.error("Error setting up SSL Context (%s)", ex)
+                logger.error("Error setting up TLS transport (%s)", ex)
+                logger.debug("TLS transport setup failed", exc_info=True)
                 raise
         else:
             logger.warning("NRPE server running with TLS disabled. This is not recommended.")
+            self._tls = None
 
         # Bind Host Address and Port together
         # Look closely! The bind() function takes a tuple as its argument
@@ -265,6 +291,7 @@ class NRPEListener:
                 # Catch-all to make sure we close the connection if something bad happens
                 logger.error("Error while spawning command: %s", ex)
                 conn.close()
+                self._lock.release()
 
     def accept_connection(self) -> tuple[Union[socket.socket, SSLSocket], str]:
         """Accept and validate a connection"""
@@ -291,16 +318,32 @@ class NRPEListener:
 
             if self.server_config.tls_enabled:
                 conn.settimeout(self.server_config.tls_handshake_timeout)
-                conn = self.context.wrap_socket(conn, server_side=True)
+                try:
+                    conn = self._tls.wrap_accepted(conn)
+                except ssl.SSLError as ex:
+                    return _reject_connection(conn, f"Connection from {host}: SSL Handshake error ({ex})")
                 client_cert = conn.getpeercert()
                 if client_cert:
                     host = self.get_certificate_names(client_cert)
-                elif self.server_config.tls.check_client_cert:
+                elif self.server_config.tls.check_client_cert:  # Probably will not happen after handshake is successful
                     return _reject_connection(conn, f"Connection from {host}: no client certificate received")
 
                 logger.debug("Client certificate: %s", client_cert)
-                logger.debug("TLS version: %s", conn.version())
-                logger.debug("Cipher: %s", conn.cipher())
+                try:
+                    tls_version = conn.version()
+                    tls_cipher = conn.cipher()
+                    logger.debug("TLS version: %s", tls_version)
+                    logger.debug("Cipher: %s", tls_cipher)
+                    logger.debug(
+                        "TLS handshake OK: remote=%s peer=%s version=%s cipher=%s client_cert=%s",
+                        address,
+                        host,
+                        tls_version,
+                        tls_cipher,
+                        bool(client_cert),
+                    )
+                except Exception:
+                    pass
         except socket.timeout as ex:
             return _reject_connection(conn, f"Connection from {host}: SSL Handshake timeout ({ex})")
         except ssl.SSLError as ex:
@@ -482,6 +525,23 @@ class NRPEListener:
             sleep(interval)
             # Clear the hostname cache
             self._hostname_cache = {}
+
+    def close(self) -> None:
+        """Stop accepting, close sockets, and release the TLS transport."""
+        self._running = False
+        self._reset_connections()
+        sock = self._socket
+        self._socket = None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+        tls = getattr(self, '_tls', None)
+        self._tls = None
+        close_tls = getattr(tls, 'close', None)
+        if close_tls is not None:
+            close_tls()
 
     def is_running(self) -> bool:
         return self._running

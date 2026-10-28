@@ -59,11 +59,22 @@ def test_get_managed_process(mocker):
     assert cmd_args[0] == ['path1']
     assert proc1 == proc_mock
     assert isinstance(lock1, BoundedSemaphore)
-    popen_mock.assert_called_with(['path1'], stdin=-1, stdout=-1, stderr=-1)
+    popen_mock.assert_called_with(['path1'], stdin=-1, stdout=-1, stderr=-1, cwd='/')
     lock1.release()
     gevent.sleep(0)
     proc2, lock2 = pm.get_managed_process('test1', 'path1')
     assert proc2 == proc1
+
+
+def test_get_managed_process_windows_omits_cwd(mocker):
+    mocker.patch('agent.processmanager.os.name', 'nt')
+    proc_mock = ProcStub()
+    popen_mock = mocker.patch('agent.processmanager.Popen', return_value=proc_mock)
+    pm = ProcessManager()
+    proc, lock = pm.get_managed_process('test1', 'path1')
+    assert proc == proc_mock
+    popen_mock.assert_called_with(['path1'], stdin=-1, stdout=-1, stderr=-1)
+    lock.release()
 
 
 def test_could_not_launch_process(mocker, caplog):

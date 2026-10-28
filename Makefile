@@ -18,7 +18,23 @@ TAR_FILE ?= infrastructure-agent.tar.gz
 AGENT_SERVICE_FILE ?= infrastructure-agent.service
 CX_FREEZE_DIR ?= build/exe.linux-x86_64-3.14
 
+# Default: host Python and host libssl. Set SHIP_WITH_PKCS11=true to freeze
+# with a Python that provides ossl-modules/pkcs11.so (OpenSSL 3.0.7+) and
+# bundle pkcs11-provider. Set PKCS11_PYTHON to that interpreter; otherwise
+# PYTHON is used.
+SHIP_WITH_PKCS11 ?= false
+_SHIP_PKCS11 := $(filter true 1 yes,$(shell echo $(SHIP_WITH_PKCS11) | tr '[:upper:]' '[:lower:]'))
+ifneq ($(_SHIP_PKCS11),)
+ifneq ($(PKCS11_PYTHON),)
+override PYTHON := $(PKCS11_PYTHON)
+FREEZE_PYTHON := $(PYTHON)
+else
 PYTHON ?= $(shell which python3)
+FREEZE_PYTHON := $(PYTHON)
+endif
+else
+PYTHON ?= $(shell which python3)
+endif
 ifdef PYTHON
 PYTHON_MAJOR_VERSION = $(shell $(PYTHON) -c 'import sys; print(sys.version_info.major)')
 PYTHON_MINOR_VERSION = $(shell $(PYTHON) -c 'import sys; print(sys.version_info.minor)')
@@ -49,6 +65,22 @@ endif
 
 ifeq ($(shell test $(PYTHON_MINOR_VERSION) -gt $(SUPPORTED_PYTHON_MINOR_VERSIONS_MAX); echo $$?), 0)
 	$(warning "'PYTHON' environment variable points to a $(PYTHON_PRETTY_VERSION) executable. This is above the recommended maximum of $(SUPPORTED_PYTHON_MAJOR_VERSION).$(SUPPORTED_PYTHON_MINOR_VERSIONS_MAX)")
+endif
+endif
+
+# pkcs11-provider 1.1 needs OpenSSL 3.0.7+. Only SHIP_WITH_PKCS11 freeze
+# requires this; unit tests may still run against distro OpenSSL 3.0.2.
+# OPENSSL_VERSION_INFO is (major, minor, fix, patch, status); 3.5.8 is
+# (3, 5, 0, 8, 0), so compare the first four fields, not [:3].
+check_freeze_openssl:
+ifneq ($(_SHIP_PKCS11),)
+ifeq ($(PLATFORM),linux)
+ifeq ($(wildcard $(PYTHON)),)
+	$(error SHIP_WITH_PKCS11 requires freeze Python at $(PYTHON))
+endif
+ifeq ($(shell $(PYTHON) -c 'import ssl,sys; sys.exit(0 if ssl.OPENSSL_VERSION_INFO[:4] >= (3, 0, 0, 7) else 1)'; echo $$?), 1)
+	$(error Linux freeze Python must be linked to OpenSSL 3.0.7 or later for pkcs11-provider 1.1 (found $(shell $(PYTHON) -c 'import ssl; print(ssl.OPENSSL_VERSION)')))
+endif
 endif
 endif
 
@@ -87,7 +119,7 @@ $(AGENT_SERVICE_FILE):
 	AGENT_BIN_PATH=$(AGENT_DIR)/bin/infrastructure-agent envsubst < $@.in > $@
 
 ifneq ("$(wildcard $(PLUGIN_DIR))", "")
-$(CFG): BUILD_CONFIG_ARGS=--install-dir $(AGENT_DIR) --plugin-config-dir $(PLUGIN_DIR)/config
+$(CFG): BUILD_CONFIG_ARGS=--install-dir $(AGENT_DIR) --plugin-config-dir $(PLUGIN_DIR)/src/config
 else
 $(CFG): BUILD_CONFIG_ARGS=--install-dir $(AGENT_DIR)
 endif
@@ -110,11 +142,21 @@ else
 	@echo "Skipping Plugin compilation, '$(PLUGIN_DIR)' not found"
 endif
 
-agent:
+agent: $(VENV)
 	@# Build the infrastructure agent
 	mkdir -p $(BUILD_EXE_DIR) $(INSTALLER_DIR)
 	. $(VENV)/bin/activate && python -m cx_Freeze build
 	cp -r $(CX_FREEZE_DIR)/* $(BUILD_EXE_DIR)
+ifeq ($(PLATFORM),linux)
+ifneq ($(_SHIP_PKCS11),)
+	chmod +x scripts/bundle_pkcs11_provider.sh
+	. $(VENV)/bin/activate && PYTHON=$(PYTHON) ./scripts/bundle_pkcs11_provider.sh $(BUILD_EXE_DIR)
+endif
+endif
+
+ifneq ($(_SHIP_PKCS11),)
+agent: check_freeze_openssl
+endif
 
 build: agent plugins $(AGENT_SERVICE_FILE) $(CFG) $(VAR_DIR)
 	cp $(AGENT_SERVICE_FILE) $(INSTALLER_DIR)
@@ -149,4 +191,4 @@ ifneq ("$(wildcard $(PLUGIN_DIR))", "")
 	$(MAKE) -C $(PLUGIN_DIR) clean
 endif
 
-.PHONY: all lint test agent build create-user set-permission install plugins clean tar check_python_version
+.PHONY: all lint test agent build create-user set-permission install plugins clean tar check_python_version check_freeze_openssl

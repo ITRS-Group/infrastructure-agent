@@ -23,8 +23,7 @@ def server(agent_config, platform_linux, mocker) -> NRPEListener:
     mocker.patch('nrpe.server.Semaphore')
     mocker.patch('nrpe.server.socket', timeout=SocketTimeout, herror=Exception)
     mocker.patch('nrpe.server.spawn')
-    mocker.patch('nrpe.server.get_ssl_context')
-    mocker.patch('nrpe.server.verify_certificate')
+    mocker.patch('nrpe.server.create_tls_server', return_value=mocker.Mock())
     svr = NRPEListener(platform_linux, agent_config.server, mocker.Mock())
     yield svr
 
@@ -141,7 +140,7 @@ def test_match_hostname(cert, hostname, resolved_ips, expected):
         pytest.param([], True, False, [mock.Mock()], True, False, None, ['with TLS'], id="tls_windows"),
         pytest.param(
             [], True, False, False, True, False, Exception,
-            ['with TLS', 'Error setting up SSL Context'],
+            ['with TLS', 'Error setting up TLS transport'],
             id="context_error",
         ),
         pytest.param(
@@ -163,7 +162,7 @@ def test_nrpe_server_post_init(
     server.server_config.allowed_hosts = allowed_hosts
     server.server_config.tls_enabled = tls
     server.server_config.tls.check_client_cert = check_client_cert
-    mocker.patch('nrpe.server.get_ssl_context', side_effect=context)
+    mocker.patch('nrpe.server.create_tls_server', side_effect=context)
     if windows:
         server.platform = platform_win
     if not exception:
@@ -174,6 +173,20 @@ def test_nrpe_server_post_init(
     assert server._host_filtering == filtering
     for text in logexp:
         assert text in caplog.text
+
+
+def test_nrpe_tls_debug_redacts_pkcs11_pin_in_uri(server, caplog):
+    server.server_config.allowed_hosts = []
+    server.server_config.tls_enabled = True
+    server.server_config.tls.pkcs11_key_uri = (
+        'pkcs11:object=key?pin-value=1234&pin-source=file:/tmp/pin'
+    )
+    server.__post_init__()
+    assert '1234' not in caplog.text
+    assert '/tmp/pin' not in caplog.text
+    assert 'pin-value=***' in caplog.text
+    assert 'pin-source=***' in caplog.text
+    assert 'pkcs11:object=key' in caplog.text
 
 
 @pytest.mark.parametrize('tls, check_cert, allowed_hosts, getaddr, expected, logexp', [
@@ -287,6 +300,7 @@ def test_nrpe_server_initialise_allowed_hosts(
 def test_nrpe_server_command_listener(lock, accept_connection, spawn, exception, logexp, mocker, server, caplog):
     server.is_running = mocker.Mock(side_effect=[True, True, False])
     server._lock.acquire = mocker.Mock(side_effect=lock + [StopIteration])
+    server._lock.release = mocker.Mock()
     server.accept_connection = mocker.Mock(return_value=accept_connection)
     mocker.patch('nrpe.server.spawn', side_effect=[spawn])
     if not exception:
@@ -296,6 +310,8 @@ def test_nrpe_server_command_listener(lock, accept_connection, spawn, exception,
             server.command_listener()
     for text in logexp:
         assert text in caplog.text
+    if spawn and isinstance(spawn, Exception):
+        server._lock.release.assert_called_once()
 
 
 def test_nrpe_server_force_close_active_connections(mocker, server, caplog):
@@ -315,6 +331,10 @@ def test_nrpe_server_force_close_active_connections(mocker, server, caplog):
             True, ssl.SSLError, None, None, None, None, {'knownhost.foo': []},
             (None, None), ['SSL Handshake error'],
             id="ssl_error"),
+        pytest.param(
+            True, ('knownhost', 42), ssl.SSLError, None, None, None, {'knownhost.foo': []},
+            (None, None), ['SSL Handshake error'],
+            id="ssl_wrap_error"),
         pytest.param(
             True, socket.error, None, None, None, None, {'knownhost.foo': []},
             (None, None), ['Socket error'],
@@ -351,6 +371,7 @@ def test_nrpe_server_force_close_active_connections(mocker, server, caplog):
             (True, 'known.foo'),
             [
                 'Client certificate: ', 'TLS version: ', 'Cipher: ',
+                "TLS handshake OK: remote=('knownhost.foo', 42) peer=known.foo",
                 "Host 'knownhost.foo' allowed", "Connection accepted from: 'known.foo'",
             ],
             id="success_tls"),
@@ -514,7 +535,7 @@ def test_nrpe_server_accept_connection(
         server._allowed_hosts = allowed_hosts
     server.server_config.tls_enabled = tls
     if tls:
-        server.context.wrap_socket.side_effect = [wrap or mock_conn]
+        server._tls.wrap_accepted.side_effect = [wrap or mock_conn]
         mock_conn.getpeercert.return_value = cert
 
     (conn, host) = server.accept_connection()
@@ -523,6 +544,22 @@ def test_nrpe_server_accept_connection(
     assert host == expected[1]
     for text in logexp:
         assert text in caplog.text
+
+
+def test_nrpe_accept_tls_version_cipher_log_failure(mocker, server, caplog):
+    mock_conn = mocker.Mock()
+    mock_conn.getpeercert.return_value = None
+    mock_conn.version.side_effect = Exception('no version')
+    server._socket.accept.return_value = (mock_conn, ('knownhost.foo', 42))
+    server._host_filtering = False
+    server.server_config.tls.check_client_cert = False
+    server._block_all_hosts = False
+    server.server_config.tls_enabled = True
+    server._tls.wrap_accepted.return_value = mock_conn
+    conn, host = server.accept_connection()
+    assert conn is mock_conn
+    assert host == 'knownhost.foo'
+    assert 'Client certificate:' in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -744,3 +781,39 @@ def test_nrpe_gproxy(func, error, expected, server, mocker, caplog):
             server._gproxy(mock_func)
     assert mock_func.called
     assert expected in caplog.text
+
+
+def test_nrpe_close_releases_tls_and_socket(server, mocker):
+    sock = mocker.Mock()
+    tls = mocker.Mock()
+    server._socket = sock
+    server._tls = tls
+    server._running = True
+
+    server.close()
+
+    assert server._running is False
+    assert server._socket is None
+    assert server._tls is None
+    sock.close.assert_called_once()
+    tls.close.assert_called_once()
+
+
+def test_nrpe_close_swallows_socket_error_without_tls_close(server, mocker):
+    sock = mocker.Mock()
+    sock.close.side_effect = OSError('already closed')
+    server._socket = sock
+    server._tls = object()
+
+    server.close()
+
+    sock.close.assert_called_once()
+    assert server._tls is None
+
+
+def test_nrpe_close_without_socket_or_tls(server):
+    server._socket = None
+    server._tls = None
+    server.close()
+    assert server._socket is None
+    assert server._tls is None

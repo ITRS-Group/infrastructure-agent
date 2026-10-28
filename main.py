@@ -40,19 +40,60 @@ infrastructure_agent: Agent = None
 STARTUP_LOG_FILE = get_startup_log_path()
 
 
+def _handle_sigterm():
+    """Exit through the normal shutdown path so PIN files are unlinked."""
+    from agent.agent import handle_sigterm
+
+    try:
+        if logger is not None:
+            logger.info("Received SIGTERM, stopping the Agent")
+        else:
+            startup_log("Received SIGTERM, stopping the Agent")
+    except Exception:
+        pass
+    handle_sigterm(infrastructure_agent)
+
+
+def _install_sigterm_handler():
+    from agent.agent import install_sigterm_handler
+
+    if install_sigterm_handler(_handle_sigterm):
+        return
+    if sys.platform != 'win32':
+        startup_log("SIGTERM handler was not installed; PKCS#11 PIN files may be left behind", "[WARNING]")
+
+
+def _remove_stale_pkcs11_pin_files():
+    from agent.pkcs11 import remove_stale_pin_files
+
+    try:
+        removed = remove_stale_pin_files()
+    except Exception as ex:
+        startup_log(f"Failed to remove stale PKCS#11 PIN files: {ex}", "[WARNING]")
+        return
+    for path in removed:
+        startup_log(f"Removed stale PKCS#11 PIN file '{path}'")
+
+
 def start_agent(config: AgentConfig) -> int:
     """Blocking function to start the Agent"""
     global infrastructure_agent
 
-    from agent.agent import Agent
+    from agent.agent import Agent, shutdown_requested
     from agent.cachemanager import CacheManager
 
+    if shutdown_requested:
+        return RETURN_CODE_OK
     if infrastructure_agent:
         stop_agent()  # Ensure we're stopped
         time.sleep(1)
+    if shutdown_requested:
+        return RETURN_CODE_OK
     logger.info("Starting the Agent")
     cache_manager = CacheManager(config.cachemanager)
     infrastructure_agent = Agent(cache_manager, config)
+    if shutdown_requested:
+        return RETURN_CODE_OK
     return infrastructure_agent.run()
 
 
@@ -90,6 +131,8 @@ def main():
         pass
 
     startup_log("Starting Infrastructure Agent")
+    _install_sigterm_handler()
+    _remove_stale_pkcs11_pin_files()
     startup_log(f"Running with Python version '{sys.version.split()[0]}', encoding '{sys.getfilesystemencoding()}'")
 
     try:

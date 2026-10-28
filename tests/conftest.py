@@ -34,7 +34,7 @@ def agent_config() -> AgentConfig:
 
 @pytest.fixture
 def platform_win() -> Platform:
-    yield Platform('Windows', 'x86_64', ('Server', '2016'))
+    yield Platform('Windows', 'x86_64', ('10', '10.0.17763', 'SP0', 'Multiprocessor Free'))
 
 
 @pytest.fixture
