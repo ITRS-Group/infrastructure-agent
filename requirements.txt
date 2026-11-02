@@ -2,7 +2,7 @@
 # Python libraries used by (or to build) the infrastructure-agent
 
 cffi==2.0.0
-cryptography==46.0.7
+cryptography==50.0.2
 cx-freeze==8.6.4
 cx-logging==3.2.1; sys_platform == 'win32'
 gevent==26.4.0
